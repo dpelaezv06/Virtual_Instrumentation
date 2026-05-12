@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import serial as pyserial
 
 """
 En este script vamos a generar una señal modulada en amplitud (AM) utilizando Python.
@@ -21,4 +22,11 @@ time = np.linspace(0, 2, 1000)
 moduler_signal = moduler_amplitude * np.cos(2 * np.pi * moduler_frecuency * time) # creacion de la seeñal moduladora
 
 AM_signal = (carrier_amplitude + moduler_signal) * np.cos(2 * np.pi * carrier_frecuency * time) # creacion de la señal de amplitud modulada
+
+
+# Enviamos la señal por el serial al ESP32
+
+velocidad_puerto = 115200 #velocidad de transmision del puerto
+puerto = '/dev/ttyACM0'
+puerto_serial = pyserial.Serial(puerto, velocidad_puerto) #abrimos el puerto serial
 
