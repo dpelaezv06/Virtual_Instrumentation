@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import serial as pyserial
+import time
 
 """
 En este script vamos a generar una señal modulada en amplitud (AM) utilizando Python.
@@ -29,4 +30,7 @@ AM_signal = (carrier_amplitude + moduler_signal) * np.cos(2 * np.pi * carrier_fr
 velocidad_puerto = 115200 #velocidad de transmision del puerto
 puerto = '/dev/ttyACM0'
 puerto_serial = pyserial.Serial(puerto, velocidad_puerto) #abrimos el puerto serial
+
+time.sleep(2) #se esperan 2 segundos
+
 
