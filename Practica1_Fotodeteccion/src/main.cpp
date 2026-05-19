@@ -1,33 +1,35 @@
 #include <Arduino.h>
 
-// put function declarations here:
-int myFunction(int, int);
+uint8_t valor_recibido;
+const int PIN_DAC = 25;
+const int PIN_ADC = 34;
+const long BAUD_RATE = 115200;
+int valor_dac = 0;
+
 
 void setup() {
-  const int PIN_RX_UART = 16;
-  const int PIN_TX_UART = 17;
 
-  const long BAUD_RATE = 115200;
 
   Serial.begin(BAUD_RATE, SERIAL_8N1);
+  //pinMode(PIN_ADC, INPUT);
 
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
 
-  Serial.println("Hello, world!");
 
-  if (Serial.available() > 0) {
-    String respuesta = Serial.readStringUntil('\n');
+  /* se lee el valor de la señal AM desde el puerto serial y se muestra en el monitor serial. */
 
-  }
+  // if (Serial.available() > 0) {
+  //   valor_recibido = Serial.read();
+  //   Serial.print("Valor recibido: ");
+  //   Serial.println(valor_recibido);
 
-  delay(1000);
+  // }
 
+  dacWrite(PIN_DAC, 128); // Escribe el valor en el pin DAC
+
+  delay(20); // Pequeña pausa para evitar saturar el puerto serial
 }
 
 // put function definitions here:
-int myFunction(int x, int y) {
-  return x + y;
-}

@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import serial as pyserial
-import time
+import time as t
 
 
 """
@@ -10,21 +10,35 @@ La modulación en amplitud es una técnica de modulación en la que la amplitud 
 """
 
 #Primero solicitamos al usuario los parámetros de la señal modulada y la portadora
-moduler_amplitude = 0.5 # Voltios
-moduler_frecuency = 20 # Hz
-carrier_amplitude = 1 # Voltios
+moduler_amplitude = 2.5 / 2 # Voltios
+moduler_frecuency = 10 # Hz
+carrier_amplitude = 1  # Voltios
 carrier_frecuency = 80 # Hz
 
 #Recordemos que m = Vm / Vc, donde Vm es la amplitud de la señal moduladora y Vc es la amplitud de la portadora
 #modulation_index = float (input("Ingrese el índice de modulación: "))
 
 #Generamos un vector de tiempo de 1 segundo con 1000 muestras
-time = np.linspace(0, 2, 1000) 
+time = np.linspace(0, 0.3, 10000)
 
 moduler_signal = moduler_amplitude * np.cos(2 * np.pi * moduler_frecuency * time) # creacion de la seeñal moduladora
 
 AM_signal = (carrier_amplitude + moduler_signal) * np.cos(2 * np.pi * carrier_frecuency * time) # creacion de la señal de amplitud modulada
 
+''' sumar un offset para que la senal varie entre 0 y 5 voltios'''
+
+AM_signal = AM_signal + 2.5 # sumamos un offset de 2.5 voltios para que la señal varie entre 0 y 5 voltios
+
+''' metemos la senal en una escala de 0 a 255 para que el microcontrolador pueda leerla'''
+AM_signal = (AM_signal / np.max(AM_signal)) * 255
+
+
+''' graficamos la señal modulada en amplitud para verificar que se ha generado correctamente'''
+plt.plot(time, AM_signal)
+plt.title("Señal modulada en amplitud (AM)")
+plt.xlabel("Tiempo (s)")
+plt.grid()
+plt.show()
 
 # Enviamos la señal por el serial al ESP32
 
@@ -32,40 +46,24 @@ velocidad_puerto = 115200 #velocidad de transmision del puerto
 puerto = '/dev/ttyACM0'
 puerto_serial = pyserial.Serial(puerto, velocidad_puerto) #abrimos el puerto serial
 
-  # --- PROCEDIMIENTO DE RECEPCION ---
-    
+
+
+''' enviar los datos de la senal al UMC'''
 try:
     # Se inicializa la conexion serial. 
     # Se establece un timeout de 1 segundo para evitar bloqueos en la lectura.
     conexion_serial = pyserial.Serial(puerto, velocidad_puerto, timeout=1)
   
     # Se incluye una pausa 
-    time.sleep(2)
+    t.sleep(2)
+
+    ''' Enviar la señal AM al microcontrolador.'''
+    while True:
+        for valor in AM_signal:
+            # Se convierte el valor de la señal a bytes y se envía por el puerto serial.
+            conexion_serial.write(valor.astype(np.uint8))
     
-    
-    # --- PROCEDIMIENTO DE ENVIO ---
-    
-    # Se define el mensaje a enviar, agregando un salto de linea al final.
-    comando = "ENCENDER_LED\n"
-    
-    # Se convierte el texto a formato de bytes (UTF-8) y se envia por el puerto.
-    conexion_serial.write(comando.encode('utf-8'))
-    print("Comando enviado al microcontrolador.")
-    
-    
-    
-    # --- PROCEDIMIENTO DE RECEPCION ---
-    
-    time.sleep(0.1)
-    
-    # Se verifica si hay bytes esperando en el bufer de entrada de la computadora.
-    if conexion_serial.in_waiting > 0:
-        
-        # Se lee la linea de respuesta proveniente del microcontrolador.
-        respuesta_bytes = conexion_serial.readline()
-        
-        # Se convierte la respuesta de bytes a texto
-        respuesta_texto = respuesta_bytes.decode('utf-8').strip()
+
 
 
 except pyserial.SerialException as error:
