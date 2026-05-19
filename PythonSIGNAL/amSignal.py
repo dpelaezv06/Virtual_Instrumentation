@@ -43,7 +43,7 @@ plt.show()
 # Enviamos la señal por el serial al ESP32
 
 velocidad_puerto = 115200 #velocidad de transmision del puerto
-puerto = '/dev/ttyACM0'
+puerto = '/dev/ttyUSB0'
 puerto_serial = pyserial.Serial(puerto, velocidad_puerto) #abrimos el puerto serial
 
 

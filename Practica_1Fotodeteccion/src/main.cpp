@@ -29,7 +29,7 @@ void loop() {
 
   dacWrite(PIN_DAC, valor_recibido); // Escribe el valor en el pin DAC
 
-  delay(20); // Pequeña pausa para evitar saturar el puerto serial
+  //delay(20); // Pequeña pausa para evitar saturar el puerto serial
 }
 
 // put function definitions here:
