@@ -22,8 +22,7 @@ void loop() {
 
   if (Serial.available() > 0) {
     valor_recibido = Serial.read();
-    Serial.print("Valor recibido: ");
-    Serial.println(valor_recibido);
+
 
   }
 
