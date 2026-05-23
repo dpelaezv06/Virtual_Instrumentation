@@ -16,6 +16,6 @@ void loop() {
   
   // Process the ADC value as needed
   //Enviamos el adc_value al puerto serial como int
-  Serial.print(adc_value);
+  Serial.println(adc_value);
 
 }

@@ -53,7 +53,11 @@ slider_polling.on_changed(update_pollingTime)
 try:
     while True:
         if puerto_serial.in_waiting > 0: # verificamos si hay datos disponibles en el puerto serial
-            valor_ADC = int(puerto_serial.read()) # leemos el valor del ADC
+            valor_ADC = puerto_serial.readline().decode('utf-8').strip() # leemos el valor del ADC
+            if valor_ADC != '':
+                valor_ADC = int(valor_ADC) # convertimos el valor del ADC a entero
+
+                
             print(f"Valor del ADC recibido: {valor_ADC}") # imprimimos el valor del ADC recibido por el serial
             tiempo_actual = time.time() * 1000 # obtenemos el tiempo actual en milisegundos
             valores_ADC = np.append(valores_ADC, valor_ADC) # agregamos el valor del ADC al array de valores_ADC
@@ -62,9 +66,9 @@ try:
             ''' antes de graficar verificamos que haya transcurrido el tiempo de polling desde la ultima actualizacion'''
 
             if tiempos[-1] - tiempos[0] >= polling_time * 1000: # verificamos si ha transcurrido el tiempo de polling en milisegundos
-                update_plot() # actualizamos la grafica con los nuevos datos
-                tiempos = np.array([]) # reiniciamos el array de tiempos para almacenar los nuevos tiempos a partir de la siguiente actualizacion
-                valores_ADC = np.array([]) # reiniciamos el array de valores_ADC para almacenar los nuevos valores del ADC a partir de la siguiente actualizacion
+               update_plot() # actualizamos la grafica con los nuevos datos
+               tiempos = np.array([]) # reiniciamos el array de tiempos para almacenar los nuevos tiempos a partir de la siguiente actualizacion
+               valores_ADC = np.array([]) # reiniciamos el array de valores_ADC para almacenar los nuevos valores del ADC a partir de la siguiente actualizacion
 
 
 
