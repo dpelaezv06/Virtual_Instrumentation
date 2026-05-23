@@ -2,11 +2,12 @@
 
 //Definimos el pin ADC
 const int PIN_ADC = 34;
-const long sampling_rate = 1000; // Frecuencia de muestreo en Hz
 const long BAUD_RATE = 115200;
-const long sampling_period = 1/sampling_rate;
-const long initial_time = 0;
 
+const uint32_t sampling_rate = 1000;
+const uint32_t sampling_period = 1000000 / sampling_rate;
+
+uint32_t last_sample = 0;
 
 void setup() {
   // put your setup code here, to run once:
@@ -15,12 +16,15 @@ void setup() {
 }
 
 void loop() {
-  const long current_time = millis();
-  if (current_time - initial_time >= sampling_period) {
-    // Lee el valor del ADC 
-    int adc_value = analogRead(PIN_ADC);
-    // Process the ADC value as needed
-    //Enviamos el adc_value al puerto serial como int
-    Serial.println(adc_value);
-   
+
+    uint32_t time_now = micros();
+
+    if(time_now - last_sample >= sampling_period){
+
+        last_sample += sampling_period;
+
+        uint16_t adc_value = analogRead(PIN_ADC);
+
+        Serial.write((uint8_t*)&adc_value, sizeof(adc_value));
+    }
 }
