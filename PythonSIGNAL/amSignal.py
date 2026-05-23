@@ -32,13 +32,14 @@ AM_signal = AM_signal + 2.5 # sumamos un offset de 2.5 voltios para que la seña
 ''' metemos la senal en una escala de 0 a 255 para que el microcontrolador pueda leerla'''
 AM_signal = (AM_signal / np.max(AM_signal)) * 255
 
-
+"""
 ''' graficamos la señal modulada en amplitud para verificar que se ha generado correctamente'''
 plt.plot(time, AM_signal)
 plt.title("Señal modulada en amplitud (AM)")
 plt.xlabel("Tiempo (s)")
 plt.grid()
 plt.show()
+"""
 
 # Enviamos la señal por el serial al ESP32
 
