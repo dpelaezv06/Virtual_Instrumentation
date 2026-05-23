@@ -19,7 +19,7 @@ carrier_frecuency = 80 # Hz
 #modulation_index = float (input("Ingrese el índice de modulación: "))
 
 #Generamos un vector de tiempo de 1 segundo con 1000 muestras
-time = np.linspace(0, 1/moduler_frecuency, 11520)
+time = np.linspace(0, 1/moduler_frecuency, 1152)
 
 moduler_signal = moduler_amplitude * np.cos(2 * np.pi * moduler_frecuency * time) # creacion de la seeñal moduladora
 
