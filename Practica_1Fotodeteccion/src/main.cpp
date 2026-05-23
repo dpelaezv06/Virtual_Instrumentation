@@ -1,8 +1,7 @@
 #include <Arduino.h>
 
 uint8_t valor_recibido;
-const int PIN_DAC = 25;
-const int PIN_ADC = 34;
+const int DAC_PIN = A0;
 const long BAUD_RATE = 115200;
 int valor_dac = 0;
 
@@ -11,7 +10,8 @@ void setup() {
 
 
   Serial.begin(BAUD_RATE, SERIAL_8N1);
-  pinMode(PIN_ADC, INPUT);
+  pinMode(DAC_PIN, OUTPUT);
+  analogReadResolution(12); // Configura la resolución de lectura analógica a 12 bits (0-4095)
 
 }
 
@@ -26,7 +26,9 @@ void loop() {
 
   }
 
-  dacWrite(PIN_DAC, valor_recibido); // Escribe el valor en el pin DAC
+  analogWrite(DAC_PIN, 80); // Escribe el valor en el pin DAC
+  Serial.println(80);
+
 
   //delay(20); // Pequeña pausa para evitar saturar el puerto serial
 }
