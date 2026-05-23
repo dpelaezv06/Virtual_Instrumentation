@@ -12,13 +12,10 @@ void setup() {
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-  long start_time = millis();
   int adc_value = analogRead(PIN_ADC);
-  long end_time = millis();
   
   // Process the ADC value as needed
   //Enviamos el adc_value al puerto serial como int
-  Serial.println(adc_value);
+  Serial.print(adc_value);
 
 }
