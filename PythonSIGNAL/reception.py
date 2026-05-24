@@ -1,48 +1,44 @@
 import numpy as np
 import serial as pyserial
-import time 
+import time
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 from scipy.signal import hilbert
 
 
 def update_plot():
-    global line, line2, line3, valores_ADC, senal_demodulada, fft_senal, tiempos
+    global fig, line, line2, line3, valores_ADC, senal_demodulada, fft_senal, tiempos
     line.set_data(tiempos, valores_ADC) # actualizamos los datos de la grafica de la senal del ADC
     line2.set_data(tiempos, senal_demodulada) # actualizamos los datos de la grafica de la senal demodulada
-    line3.set_data(fft_frecuencias, fft_senal) # actualizamos los datos de la grafica de la FFT de la senal demodulada
+    line3.set_data(fft_frecuencias, np.abs(fft_senal)) # actualizamos los datos de la grafica de la FFT de la senal demodulada
     ax1.relim() # recalculamos los limites de la grafica de la senal del ADC
     ax1.autoscale_view() # ajustamos la vista de la grafica de la senal del ADC
     ax2.relim() # recalculamos los limites de la grafica de la senal demodulada
     ax2.autoscale_view() # ajustamos la vista de la grafica de la senal demodulada
     ax3.relim() # recalculamos los limites de la grafica de la FFT de la senal demodulada
     ax3.autoscale_view() # ajustamos la vista de la grafica de la FFT de la senal demodulada
-    plt.draw()
-    plt.pause(0.01)
+    plt.draw() # redibujamos la grafica con los nuevos datos
+    plt.pause(0.01) # pausamos brevemente para permitir que la grafica
 
 def update_pollingTime(val):
     global polling_time
     polling_time = slider_polling.val
 
 
-
-
-
-""" En este script se recibira la senal AM enviada por el ESP32 por el serial /dev/ttyACM0, se graficara, se demodulara,
+""" En este script se recibira la senal AM enviada por el ESP32 por el serial /dev/ttyACM1, se graficara, se demodulara,
 se le calculara y mostrara su FFT """
 
-velocidad_puerto = 115200 #velocidad de transmision del puerto
-puerto = '/dev/ttyACM1'
-puerto_serial = pyserial.Serial(puerto, velocidad_puerto) #abrimos el puerto serial
+velocidad_puerto = 115200 # velocidad de transmision del puerto
+puerto = '/dev/ttyACM0'
+puerto_serial = pyserial.Serial(puerto, velocidad_puerto, timeout=1)
 time.sleep(2) # esperamos 2 segundos para que el puerto serial se estabilice
 
-
-valores_ADC = np.array([]) #creamos un array vacio para almacenar los valores del ADC
-senal_demodulada = np.array([]) #creamos un array vacio para almacenar los valores de la señal demodulada
-fft_senal = np.array([]) #creamos un array vacio para almacenar los valores de la FFT de la señal demodulada
+valores_ADC =np.array([]) # lista para almacenar los valores del ADC
+senal_demodulada = np.array([]) # array para la señal demodulada
+fft_senal = np.array([]) # array para la FFT de la señal demodulada
 fft_frecuencias = np.array([])
-tiempos = np.array([]) #creamos un array vacio para almacenar los tiempos en los cuales se recibio cada valor del ADC
-polling_time = 5 # es el tiempo en el cual el programa va a almacenar los datos del ADC recibidos por el serial cada que ocurra un polling, se actualizara la grafica 
+tiempos = np.array([]) # lista para almacenar los tiempos de los valores ADC
+polling_time = 0.5 # tiempo de polling en segundos para actualizar la grafica
 
 ''' se generaran 3 graficas:
 1. la senal del ADC recibida por el serial
@@ -70,14 +66,16 @@ ax3.set_ylabel("Magnitud")
 ax3.grid()
 
 plt.tight_layout() # ajustamos el layout de las graficas para que no se solapen
-plt.pause(0.01) # hacemos una pausa para que se muestren las graficas antes de empezar a actualizar los datos
-plt.show()
+plt.ion()
+plt.show(block=False)
+plt.pause(0.1)
+
 
 
 
 ''' generamos un slider para ajustar el tiempo de polling y asi controlar la tasa de actualizacion de la grafica y la cantidad de datos almacenados en los arrays de tiempos y valores_ADC'''
 ax_polling = plt.axes([0.25, 0.01, 0.50, 0.03]) # creamos un eje para el slider
-slider_polling = Slider(ax_polling, 'Polling Time (s)', 0.1, 5.0, valinit=polling_time) # creamos el slider con un rango de 0.1 a 5 segundos y un valor inicial de 2 segundos
+slider_polling = Slider(ax_polling, 'Polling Time (s)', 0.1, polling_time, valinit=polling_time) # rango de 0.5 a 2 segundos, valor inicial 2
 
 ''' conectamos el slider a la funcion que actualiza el tiempo de polling '''
 slider_polling.on_changed(update_pollingTime)
@@ -86,43 +84,31 @@ slider_polling.on_changed(update_pollingTime)
 try:
     tiempo_inicio = time.time()
     while True:
-        if puerto_serial.in_waiting > 0: # verificamos si hay datos disponibles en el puerto serial
-            data = puerto_serial.read(2)
-            valor_ADC = int.from_bytes(data, byteorder='little')
-            try:
-                valor_ADC = int(valor_ADC) # convertimos el valor del ADC a un entero
-            except ValueError:
-                continue
+        data = puerto_serial.read(2) #
+        valor_ADC = int.from_bytes(data, byteorder='little')
+        tiempo_actual = time.time()
+        valores_ADC= np.append(valores_ADC, valor_ADC)
+        tiempos= np.append(tiempos, tiempo_actual - tiempo_inicio)
 
+        if tiempos[-1] - tiempos[0]>= polling_time:
+            array_adc = np.asarray(valores_ADC, dtype=float)
+            tiempos_arr = np.asarray(tiempos, dtype=float)
 
-            #print(f"Valor del ADC recibido: {valor_ADC}") # imprimimos el valor del ADC recibido por el serial
-            tiempo_actual = time.time()  # obtenemos el tiempo actual en milisegundos
-            valores_ADC = np.append(valores_ADC, valor_ADC) # agregamos el valor del ADC al array de valores_ADC
-            tiempos = np.append(tiempos, (tiempo_actual - tiempo_inicio)) # agregamos el tiempo actual al array de tiempos
+            senal_demodulada = np.abs(hilbert(array_adc - array_adc.mean()))
+            senal_demodulada -= senal_demodulada.mean()
 
-            ''' antes de graficar verificamos que haya transcurrido el tiempo de polling desde la ultima actualizacion'''
+            fft_senal = np.abs(np.fft.rfft(array_adc))
+            if fft_senal.max() != 0:
+                fft_senal /= fft_senal.max()
+            fft_frecuencias = np.fft.rfftfreq(
+                len(array_adc),
+                d=np.mean(np.diff(tiempos_arr)) if len(tiempos_arr) > 1 else 1.0,
+            )
 
-            if tiempos[-1] - tiempos[0] >= polling_time: # verificamos si ha transcurrido el tiempo de polling en milisegundos
-               senal_demodulada = valores_ADC - np.mean(valores_ADC) #quitamos el offset
-               senal_demodulada = np.abs(hilbert(senal_demodulada))
-               senal_demodulada = senal_demodulada - np.mean(senal_demodulada) #quitamos el offset de la demodulada
-
-               fft_senal = np.fft.fft(valores_ADC)
-               fft_senal = fft_senal / (np.max(fft_senal))
-               fft_senal = fft_senal[:len(fft_senal)//2] # nos quedamos solo con la mitad de los valores de la FFT (los correspondientes a las frecuencias positivas)
-               fft_frecuencias = np.fft.fftfreq(len(valores_ADC), d=(tiempos[-1] - tiempos[0])) # calculamos las frecuencias correspondientes a cada valor de la FFT
-               fft_frecuencias = fft_frecuencias[:len(fft_frecuencias)//2] # nos quedamos solo con la mitad de las frecuencias (las positivas)
-
-
-
-               
-               update_plot() # actualizamos la grafica con los nuevos datos
-               tiempos = np.array([]) # reiniciamos el array de tiempos para almacenar los nuevos tiempos a partir de la siguiente actualizacion
-               valores_ADC = np.array([]) # reiniciamos el array de valores_ADC para almacenar los nuevos valores del ADC a partir de la siguiente actualizacion
-               tiempo_inicio = time.time()
-
-
-
+            update_plot()
+            tiempos = np.array([])
+            valores_ADC = np.array([])
+            tiempo_inicio = time.time()
 except KeyboardInterrupt:
     print("Programa terminado por el usuario.")
 finally:

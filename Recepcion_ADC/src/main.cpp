@@ -1,7 +1,7 @@
 #include <Arduino.h>
 
 //Definimos el pin ADC
-const int PIN_ADC = 34;
+const int PIN_ADC = 35;
 const long BAUD_RATE = 115200;
 
 const uint32_t sampling_rate = 1000;
