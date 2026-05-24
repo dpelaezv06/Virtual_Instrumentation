@@ -26,8 +26,7 @@ void loop() {
 
   }
 
-  analogWrite(DAC_PIN, 80); // Escribe el valor en el pin DAC
-  Serial.println(80);
+  analogWrite(DAC_PIN, valor_recibido); // Escribe el valor en el pin DAC
 
 
   //delay(20); // Pequeña pausa para evitar saturar el puerto serial

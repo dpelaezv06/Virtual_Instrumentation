@@ -32,7 +32,7 @@ def update_pollingTime(val):
 se le calculara y mostrara su FFT """
 
 velocidad_puerto = 115200 #velocidad de transmision del puerto
-puerto = '/dev/ttyACM0'
+puerto = '/dev/ttyACM1'
 puerto_serial = pyserial.Serial(puerto, velocidad_puerto) #abrimos el puerto serial
 time.sleep(2) # esperamos 2 segundos para que el puerto serial se estabilice
 
