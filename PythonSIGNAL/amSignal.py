@@ -10,7 +10,7 @@ La modulación en amplitud es una técnica de modulación en la que la amplitud 
 """
 
 #Primero solicitamos al usuario los parámetros de la señal modulada y la portadora
-moduler_amplitude = 2.5 / 2 # Voltios
+moduler_amplitude = 1.25 # Voltios
 moduler_frecuency = 10 # Hz
 carrier_amplitude = 1  # Voltios
 carrier_frecuency = 80 # Hz
@@ -21,7 +21,7 @@ carrier_frecuency = 80 # Hz
 #Generamos un vector de tiempo de 1 segundo con 1000 muestras
 time = np.linspace(0, 1/moduler_frecuency, 1152)
 
-moduler_signal = moduler_amplitude * np.cos(2 * np.pi * moduler_frecuency * time) # creacion de la seeñal moduladora
+moduler_signal = moduler_amplitude * np.cos(2 * np.pi * moduler_frecuency * time) # creacion de la señal moduladora
 
 AM_signal = (carrier_amplitude + moduler_signal) * np.cos(2 * np.pi * carrier_frecuency * time) # creacion de la señal de amplitud modulada
 

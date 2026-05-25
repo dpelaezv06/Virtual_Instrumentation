@@ -3,7 +3,6 @@ import serial as pyserial
 import time
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
-from scipy.signal import hilbert
 
 
 def update_plot():
@@ -29,7 +28,7 @@ def update_pollingTime(val):
 se le calculara y mostrara su FFT """
 
 velocidad_puerto = 115200 # velocidad de transmision del puerto
-puerto = '/dev/ttyACM0'
+puerto = '/dev/ttyACM1'
 puerto_serial = pyserial.Serial(puerto, velocidad_puerto, timeout=1)
 time.sleep(2) # esperamos 2 segundos para que el puerto serial se estabilice
 
@@ -94,7 +93,10 @@ try:
             array_adc = np.asarray(valores_ADC, dtype=float)
             tiempos_arr = np.asarray(tiempos, dtype=float)
 
-            senal_demodulada = np.abs(hilbert(array_adc - array_adc.mean()))
+            
+            senal_demodulada = array_adc - array_adc.mean()
+            senal_demodulada = hilbert(senal_demodulada)
+            senal_demodulada = np.abs(senal_demodulada)
             senal_demodulada -= senal_demodulada.mean()
 
             fft_senal = np.abs(np.fft.rfft(array_adc))
