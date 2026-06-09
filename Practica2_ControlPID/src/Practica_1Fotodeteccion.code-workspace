@@ -1,0 +1,23 @@
+{
+	"folders": [
+		{
+			"path": "../../Practica_1Fotodeteccion"
+		},
+		{
+			"path": "../../PythonSIGNAL"
+		},
+		{
+			"name": "Recepcion_ADC",
+			"path": "../../Recepcion_ADC"
+		},
+		{
+			"name": "arduinor4_EmisionAM",
+			"path": "../../arduinor4_EmisionAM"
+		},
+		{
+			"name": "Practica2_ControlPID",
+			"path": ".."
+		}
+	],
+	"settings": {}
+}
