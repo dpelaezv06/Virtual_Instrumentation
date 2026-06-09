@@ -3,7 +3,7 @@ import serial as pyserial
 import time
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
-from scipy.signal import hilbert
+import scipy.signal as signal
 
 
 def update_plot():
@@ -29,7 +29,7 @@ def update_pollingTime(val):
 se le calculara y mostrara su FFT """
 
 velocidad_puerto = 115200 # velocidad de transmision del puerto
-puerto = '/dev/ttyACM0'
+puerto = '/dev/ttyACM1'
 puerto_serial = pyserial.Serial(puerto, velocidad_puerto, timeout=1)
 time.sleep(2) # esperamos 2 segundos para que el puerto serial se estabilice
 
@@ -70,6 +70,10 @@ plt.ion()
 plt.show(block=False)
 plt.pause(0.1)
 
+''' parametros del filtro butterworth para la senal demodulada '''
+cutoff_freq = 20 # frecuencia de corte del filtro en Hz
+filter_order = 3 # orden del filtro
+
 
 
 
@@ -91,11 +95,30 @@ try:
         tiempos= np.append(tiempos, tiempo_actual - tiempo_inicio)
 
         if tiempos[-1] - tiempos[0]>= polling_time:
+            valores_ADC = valores_ADC - np.mean(valores_ADC) # eliminamos el offset de la señal
+            valores_ADC = valores_ADC[50:]
+            tiempos = tiempos[50:]
+
             array_adc = np.asarray(valores_ADC, dtype=float)
             tiempos_arr = np.asarray(tiempos, dtype=float)
 
-            senal_demodulada = np.abs(hilbert(array_adc - array_adc.mean()))
-            senal_demodulada -= senal_demodulada.mean()
+            
+            senal_demodulada = array_adc - np.mean(array_adc) # eliminamos el offset de la señal
+            senal_demodulada = np.abs(senal_demodulada) # rectificamos
+            frecuencia_muestreo = len(tiempos_arr) / (tiempos_arr[-1] - tiempos_arr[0])
+            nyquist_freq = 0.5 * frecuencia_muestreo # calculamos la frecuencia de Nyquist
+            
+            normalized_cutoff = cutoff_freq / nyquist_freq # normalizamos la frecuencia de corte
+
+            b, a = signal.butter(filter_order, normalized_cutoff, btype='low', analog = False) # calculamos los coeficientes del filtro Butterworth
+            
+
+
+
+            senal_demodulada = signal.lfilter(b, a, senal_demodulada) # aplicamos el filtro a la señal demodulada
+            senal_demodulada = signal.filtfilt(b, a, senal_demodulada) # aplicamos el filtro a la señal demodulada
+            senal_demodulada = senal_demodulada - np.mean(senal_demodulada) # eliminamos el offset de la señal demodulada filtrada
+
 
             fft_senal = np.abs(np.fft.rfft(array_adc))
             if fft_senal.max() != 0:
@@ -104,6 +127,8 @@ try:
                 len(array_adc),
                 d=np.mean(np.diff(tiempos_arr)) if len(tiempos_arr) > 1 else 1.0,
             )
+
+            
 
             update_plot()
             tiempos = np.array([])
