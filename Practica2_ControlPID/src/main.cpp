@@ -17,7 +17,7 @@ int const pinLM35 = A0;
 float temperatura = 0.0;
 
 //variables de control
-float duttycycle_PWM_Resistencia = 0;
+int duttycycle_PWM_Resistencia = 0;
 
 //funciones en temperatura
 float leerTemperatura() {
@@ -50,7 +50,6 @@ void setup() {
   initPWM(pinPWM_Resistencia);
   // Si desea cambiar resolución global (según core), podría usarse analogWriteResolution(),
   // pero en la mayoría de cores AVR la resolución es 8 bits (0-255).
-
   
 
 }
@@ -59,7 +58,8 @@ void loop() {
   /*para la temperatura */
   temperatura = leerTemperatura();
   /* enviamos la temperatura por serial */
-  Serial.println(temperatura);
-
+  Serial.write((uint8_t*)&temperatura, sizeof(temperatura)); // Enviar temperatura como bytes
+  //Serial.println(temperatura);
+  
 }
 
