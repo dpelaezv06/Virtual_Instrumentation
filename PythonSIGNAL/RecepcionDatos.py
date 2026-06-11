@@ -9,6 +9,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import serial # <-- Importamos PySerial
 import threading # <-- Importamos Threading para lectura en segundo plano
 
+"""Interfaz de control para sistemas de temperatura y motor"""
 class InterfazControl:
     def __init__(self, root):
         self.root = root
@@ -178,8 +179,10 @@ class InterfazControl:
                     # self.med_temp = valor_ADC * factor_de_conversion_a_grados
                     
                     if self.serial_conn.in_waiting > 0:
-                        # el miro envia la temperatura en un byte
+                        # el micro envía la temperatura en un byte
+                        #linea = self.serial_conn.read(2)
                         linea = self.serial_conn.readline().decode('utf-8', errors='ignore').strip()
+                        print ("valor recibido por serial:", linea) # Debug: Muestra lo que llega por el serial
                         if linea:
                             try:
                                 self.med_temp = float(linea) # Actualiza la variable con el dato REAL
@@ -220,10 +223,6 @@ class InterfazControl:
         self.btn_inicio.config(state="disabled")
         self.btn_parada.config(state="normal")
         
-        with open("datos_experimentales.csv", mode="w", newline="") as f:
-            escritor = csv.writer(f)
-            escritor.writerow(["Timestamp", "Sistema_Activo", "Ref_Temp", "Med_Temp", "PWM_Temp", "Ref_Vel", "Med_Vel", "PWM_Motor"])
-
     def parar(self):
         self.ejecutando = False
         self.btn_inicio.config(state="normal")
@@ -296,13 +295,6 @@ class InterfazControl:
             self.historial_speed_ref.append(target_s)
             self.historial_speed_med.append(self.med_speed)
             self.historial_pwm_motor.append(self.pwm_motor)
-
-            # CSV
-            with open("datos_experimentales.csv", mode="a", newline="") as f:
-                escritor = csv.writer(f)
-                escritor.writerow([time.strftime("%H:%M:%S"), self.sistema_activo.get(), 
-                                  target_t, f"{self.med_temp:.2f}", f"{self.pwm_temp:.1f}",
-                                  target_s, f"{self.med_speed:.1f}", f"{self.pwm_motor:.1f}"])
 
             # ---- RE-DIBUJAR GRÁFICAS ----
             t_list = list(self.tiempo_x)

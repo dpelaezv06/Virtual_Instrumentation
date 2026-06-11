@@ -25,7 +25,7 @@ float leerTemperatura() {
   // En Arduino UNO el ADC es de 10 bits (0..1023) y la referencia por defecto es 5V
   float voltaje = valor_analogico * (5.0 / 1023.0);
   // LM35 entrega 10 mV por grado Celsius -> temperatura en ºC
-  float temperatura_c = voltaje * 100.0;
+  float temperatura_c = (voltaje * 100.0) - 7.0; // Ajuste de offset para calibración (si es necesario)
   return temperatura_c;
 }
 
@@ -59,7 +59,7 @@ void loop() {
   temperatura = leerTemperatura();
   /* enviamos la temperatura por serial */
   Serial.write((uint8_t*)&temperatura, sizeof(temperatura)); // Enviar temperatura como bytes
-  //Serial.println(temperatura);
+  Serial.println(temperatura);
   
 }
 
