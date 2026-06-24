@@ -13,20 +13,16 @@ int const pinPWM_Resistencia = 5;
 // Use an analog pin for LM35 (A0..A5). A0 equivale a 14 en Arduino UNO
 int const pinLM35 = A0;
 
-//variables de proceso
-float temperatura = 0.0;
+uint16_t temperaturaRawData = 0; // Variable para almacenar el valor de temperatura leido del LM35
+
 
 //variables de control
 int duttycycle_PWM_Resistencia = 0;
 
 //funciones en temperatura
-float leerTemperatura() {
+float leerTemperaturaRawData() {
   int valor_analogico = analogRead(pinLM35);
-  // En Arduino UNO el ADC es de 10 bits (0..1023) y la referencia por defecto es 5V
-  float voltaje = valor_analogico * (5.0 / 1023.0);
-  // LM35 entrega 10 mV por grado Celsius -> temperatura en ºC
-  float temperatura_c = (voltaje * 100.0) - 7.0; // Ajuste de offset para calibración (si es necesario)
-  return temperatura_c;
+  return valor_analogico;
 }
 
 // Inicializa un pin para PWM en Arduino UNO R4 WiFi
@@ -55,11 +51,12 @@ void setup() {
 }
 
 void loop() {
-  /*para la temperatura */
-  temperatura = leerTemperatura();
-  /* enviamos la temperatura por serial */
-  Serial.write((uint8_t*)&temperatura, sizeof(temperatura)); // Enviar temperatura como bytes
-  Serial.println(temperatura);
-  
-}
+  /* Leemos la temperatura */
+  temperaturaRawData = leerTemperaturaRawData();
 
+  /* ENVIAR CON PROTOCOLO DE SINCRONIZACIÓN */
+  Serial.write(' '); // 1. Byte de cabecera para sincronizar
+  Serial.write((uint8_t*)&temperaturaRawData, sizeof(temperaturaRawData)); // 2. Enviar los 2 bytes del uint16_t
+  
+  delay(50); // 3. Pausa de 50ms (envía ~20 lecturas por segundo, ideal para temperatura)
+}

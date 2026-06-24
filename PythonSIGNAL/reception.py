@@ -170,9 +170,3 @@ finally:
     puerto_serial.close() # cerramos el puerto serial al finalizar el programa
 
 
-
-
-
-
-
-
