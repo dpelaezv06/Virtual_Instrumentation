@@ -57,6 +57,16 @@ void loop() {
   /* ENVIAR CON PROTOCOLO DE SINCRONIZACIÓN */
   Serial.write(' '); // 1. Byte de cabecera para sincronizar
   Serial.write((uint8_t*)&temperaturaRawData, sizeof(temperaturaRawData)); // 2. Enviar los 2 bytes del uint16_t
-  
+
+  /* Esperamos la orden del dutty cicle que debemos poner por serial */
+
+  if (Serial.available() >= 1) {
+    // Leemos el dutty cycle enviado por el PC (1 byte)
+    duttycycle_PWM_Resistencia = Serial.read();
+    // Establecemos el dutty cycle en el pin de la resistencia
+    setPWMDuty(pinPWM_Resistencia, duttycycle_PWM_Resistencia);
+  }
+
+
   delay(50); // 3. Pausa de 50ms (envía ~20 lecturas por segundo, ideal para temperatura)
 }
