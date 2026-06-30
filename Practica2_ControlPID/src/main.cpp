@@ -15,9 +15,25 @@ int const pinLM35 = A0;
 
 uint16_t temperaturaRawData = 0; // Variable para almacenar el valor de temperatura leido del LM35
 
+//Pines necesarios para el Driver del motor
+int const in1 = 2;
+int const in2 = 3;
+
+//Pin necesario para el encoder
+int const pinEncoder = 4; 
+
+//Contador para el calculo de la velocidad del motor
+long contador = 0;
+
+//Para hacer el muestreo cada 10 ms
+unsigned long tiempoAnterior = 0;
+const unsigned long Ts = 1000000;   // 10 ms
+
 
 //variables de control
 int duttycycle_PWM_Resistencia = 0;
+int duttycycle_PWM_in1 = 40;
+int duttycycle_PWM_in2 = 0;
 
 //funciones en temperatura
 float leerTemperaturaRawData() {
@@ -35,6 +51,12 @@ void setPWMDuty(uint8_t pin, uint8_t duty) {
   analogWrite(pin, duty);
 }
 
+//Cada vez que se llama a esta funcion se incrementa el contador del encoder
+void encoderISR()
+{
+    contador++;
+}
+
 
 
 void setup() {
@@ -44,11 +66,20 @@ void setup() {
   pinMode(pinLM35, INPUT);
   // Inicializar PWM usando función wrapper para Arduino
   initPWM(pinPWM_Resistencia);
+  initPWM(in1);
+  initPWM(in2);
+  pinMode(pinEncoder, INPUT); // Configurar el pin del encoder como entrada con resistencia pull-up interna
+
+  // Configurar interrupción para el pin del encoder
+  attachInterrupt(digitalPinToInterrupt(pinEncoder), encoderISR, RISING);
+
+}
+
   // Si desea cambiar resolución global (según core), podría usarse analogWriteResolution(),
   // pero en la mayoría de cores AVR la resolución es 8 bits (0-255).
   
 
-}
+
 
 void loop() {
   /* Leemos la temperatura */
@@ -69,4 +100,19 @@ void loop() {
 
 
   delay(50); // 3. Pausa de 50ms (envía ~20 lecturas por segundo, ideal para temperatura)
+  setPWMDuty(in1, duttycycle_PWM_in1);
+  setPWMDuty(in2, duttycycle_PWM_in2);
+
+  if (micros() - tiempoAnterior >= Ts)
+    {
+      //actualizamos el tiempo anterior
+        tiempoAnterior += Ts;
+
+        // Leer encoder
+        long velocidad = contador * 60/(210*0.01); // Velocidad en pulsos por segundo (pulsos/s)
+        Serial.println(digitalRead(contador));
+        //Serial.println("velocidad: " + String(velocidad)); // Enviar velocidad al PC
+        contador = 0; // Reiniciar contador para la siguiente medición
+        
+    }
 }
