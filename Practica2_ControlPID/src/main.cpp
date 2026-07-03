@@ -18,24 +18,23 @@ volatile float temperatura = 0.0;
 
 //Pines necesarios para el Driver del motor
 int const in1 = 2;
-int const in2 = 4;
+int const in2 = 3;
 
 //Pin necesario para el encoder
-int const pinEncoder = 3; 
+int const pinEncoder = 4; 
 
 //Contador para el calculo de la velocidad del motor
-volatile long contador = 0;
+long contador = 0;
 
 //Para hacer el muestreo cada 10 ms
 unsigned long tiempoAnterior = 0;
-const unsigned long Ts = 10000; 
+const unsigned long Ts = 10000;   // 10 ms
 
 
 //variables de control
-volatile int duttycycle_PWM_Resistencia = 0;
-volatile int duttycycle_PWM_in1 = 255;
-volatile int duttycycle_PWM_in2 = 0;
-String serialBuffer = "";
+int duttycycle_PWM_Resistencia = 0;
+int duttycycle_PWM_in1 = 254;
+int duttycycle_PWM_in2 = 0;
 
 //funciones en temperatura
 float leerTemperaturaRawData() {
@@ -138,11 +137,10 @@ void loop() {
     Serial.print("t_");
     Serial.println(temperaturaRawData);
 
-    // Leer encoder
-    long velocidad = (contador * 60)/(140*0.01); // Velocidad en pulsos por segundo (pulsos/s)
-    Serial.print("v_");
-    Serial.println(velocidad);
-    contador = 0; // Reiniciar contador para la siguiente medición
-  }
-
-  }
+        // Leer encoder
+        long velocidad = (contador * 60)/(700*0.01); // Velocidad en pulsos por segundo (pulsos/s)
+        Serial.println("velocidad: " + String(velocidad)); // Enviar velocidad al PC
+        contador = 0; // Reiniciar contador para la siguiente medición
+        
+    }
+}
