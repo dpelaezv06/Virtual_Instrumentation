@@ -6,7 +6,13 @@ import threading
 from collections import deque
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import serial
+
+try:
+    from serial import Serial
+except ImportError as exc:
+    raise ImportError(
+        "Falta pyserial. Instala la librería con: .venv/bin/python -m pip install pyserial"
+    ) from exc
 
 # =====================================================================
 # BACK-END: CONTROLADOR SERIAL (Lógica de Hardware y Datos)
@@ -17,11 +23,19 @@ class ControladorSerial:
         self.conexion = None
         self.hilo_activo = False
         self.ultimo_dato = None
+        self.temperatura_cruda = None
+        self.velocidad_cruda = None
         self.lock = threading.Lock()
+        self.ultimo_pwm_enviado = None
+        self.ultimo_tipo_enviado = None
+        self.pendiente_ack = False
+        self.ack_timestamp = 0.0
+        self.ack_timeout = 0.5
+        self.ultima_orden = b""
 
     def conectar(self, puerto, baudrate):
         try:
-            self.conexion = serial.Serial(puerto, baudrate, timeout=1)
+            self.conexion = Serial(puerto, baudrate, timeout=1)
             time.sleep(2) # Tiempo para estabilizar el puerto
             self.hilo_activo = True
             threading.Thread(target=self._bucle_lectura, daemon=True).start()
@@ -35,43 +49,119 @@ class ControladorSerial:
             self.conexion.close()
 
     def _bucle_lectura(self):
-        """Lectura sincronizada esperando el espacio ' '."""
+        """Lee datos seriales con prefijos t_ y v_ para temperatura y velocidad."""
         while self.hilo_activo:
             if self.conexion and self.conexion.is_open:
                 try:
-                    # 1. Buscamos tu nuevo byte de cabecera ' ' (espacio)
-                    if self.conexion.read(1) == b' ':
-                        # 2. Leemos los 2 bytes del ADC
-                        data = self.conexion.read(2) 
-                        if len(data) == 2:
-                            valor_adc = (int.from_bytes(data, byteorder='little') * ( 5.0 / 1023.0) * 100.0) - 5
-                            
-                            with self.lock:
-                                # FACTOR DE CONVERSIÓN (Ajusta según tu LM35 y VCC)
-                                # Ejemplo: self.ultimo_dato = (valor_adc * 5.0 / 1024.0) * 100.0
-                                self.ultimo_dato = float(valor_adc) 
+                    linea = self.conexion.readline()
+                    if not linea:
+                        time.sleep(0.01)
+                        continue
+
+                    dato = linea.decode("utf-8", errors="ignore").strip()
+                    if not dato:
+                        continue
+
+                    if len(linea) > 128:
+                        continue
+
+                    if dato.startswith("ack_t"):
+                        with self.lock:
+                            if self.ultimo_tipo_enviado == "t":
+                                self.pendiente_ack = False
+                        continue
+
+                    elif dato.startswith("ack_v"):
+                        with self.lock:
+                            if self.ultimo_tipo_enviado == "v":
+                                self.pendiente_ack = False
+                        continue
+
+                    elif dato.startswith("t_"):
+                        valor = dato[2:]
+                        try:
+                            temperatura_cruda = float(valor)
+                        except ValueError:
+                            continue
+
+                        with self.lock:
+                            self.temperatura_cruda = temperatura_cruda
+                            self.ultimo_dato = temperatura_cruda
+
+                    elif dato.startswith("v_"):
+                        valor = dato[2:]
+                        try:
+                            velocidad_cruda = float(valor)
+                        except ValueError:
+                            continue
+
+                        with self.lock:
+                            self.velocidad_cruda = velocidad_cruda
+                            self.ultimo_dato = velocidad_cruda
+
                 except Exception:
                     pass
             time.sleep(0.01)
 
-    def enviar_pwm(self, pwm_valor):
-        """Toma un valor entre 0 y 255 y lo envía por serial."""
-        if self.conexion and self.conexion.is_open:
-            try:
-                # Nos aseguramos de que sea un entero y no pase de 255
-                pwm_seguro = max(0, min(255, int(pwm_valor)))
-                # bytes([valor]) convierte el número en un byte, equivalente a np.uint8().tobytes()
-                self.conexion.write(bytes([pwm_seguro]))
-            except Exception as e:
-                print(f"Error al enviar PWM: {e}")
+    def enviar_pwm(self, pwm_valor, tipo=None):
+        """Envía un PWM sobre serial usando prefijos t_ o v_ y espera ack para no saturar el puerto."""
+        if not self.conexion or not self.conexion.is_open:
+            return
+
+        if tipo not in ("t", "v"):
+            return
+
+        pwm_seguro = max(0, min(255, int(pwm_valor)))
+        mensaje = f"{tipo}_{pwm_seguro}\n".encode("utf-8")
+
+        try:
+            ahora = time.time()
+            with self.lock:
+                if self.pendiente_ack:
+                    if self.ultima_orden == mensaje and (ahora - self.ack_timestamp) < self.ack_timeout:
+                        return
+                    if (ahora - self.ack_timestamp) >= self.ack_timeout:
+                        self.pendiente_ack = False
+
+                if self.ultimo_tipo_enviado == tipo and self.ultimo_pwm_enviado == pwm_seguro and not self.pendiente_ack:
+                    return
+
+                self.conexion.write(mensaje)
+                self.ultimo_pwm_enviado = pwm_seguro
+                self.ultimo_tipo_enviado = tipo
+                self.ultima_orden = mensaje
+                self.pendiente_ack = True
+                self.ack_timestamp = ahora
+        except Exception as e:
+            print(f"Error al enviar PWM: {e}")
+
+    def obtener_temperatura_cruda(self):
+        with self.lock:
+            return self.temperatura_cruda
+
+    def obtener_velocidad_cruda(self):
+        with self.lock:
+            return self.velocidad_cruda
 
     def obtener_ultimo_dato(self):
         with self.lock:
             return self.ultimo_dato
 
+    def obtener_pwm_actual(self, tipo):
+        """Devuelve el último valor de PWM realmente escrito por el puerto serial
+        para el tipo indicado ('t' o 'v'), o None si aún no se ha enviado nada.
+        Esto es lo que hay que graficar, no el valor que el PID acaba de calcular,
+        ya que enviar_pwm() puede omitir la escritura (dedupe/ack) sin avisar al caller."""
+        with self.lock:
+            if self.ultimo_tipo_enviado == tipo:
+                return self.ultimo_pwm_enviado
+            return None
+
     def limpiar_datos(self):
         with self.lock:
             self.ultimo_dato = None
+            self.temperatura_cruda = None
+            self.velocidad_cruda = None
 
 
 # =====================================================================
@@ -100,19 +190,29 @@ class InterfazControl:
         
         self.pwm_temp_grafica = 0.0 # Guardará el % (0-100) para mostrar en la gráfica
         self.pwm_motor = 0.0
+        self.target_t = 32.5
+        self.target_s = 350.0
         
-        # Ganancias PID
-        self.kp = tk.StringVar(value="5.0")
-        self.ki = tk.StringVar(value="0.1")
-        self.kd = tk.StringVar(value="1.0")
+        # Ganancias PID por sistema
+        self.kp_temp = tk.StringVar(value="5.0")
+        self.ki_temp = tk.StringVar(value="0.1")
+        self.kd_temp = tk.StringVar(value="1.0")
+
+        self.kp_motor = tk.StringVar(value="1.5")
+        self.ki_motor = tk.StringVar(value="0.05")
+        self.kd_motor = tk.StringVar(value="0.3")
 
         # Variables internas para el cálculo matemático del PID
-        self.integral_error = 0.0
-        self.error_previo = 0.0
-        self.tiempo_previo = time.time()
+        self.integral_error_temp = 0.0
+        self.error_previo_temp = 0.0
+        self.tiempo_previo_temp = time.time()
+
+        self.integral_error_motor = 0.0
+        self.error_previo_motor = 0.0
+        self.tiempo_previo_motor = time.time()
 
         # Historial para gráficas
-        self.max_puntos = 40
+        self.max_puntos = 120
         self.tiempo_x = deque(maxlen=self.max_puntos)
         self.historial_pwm_temp = deque(maxlen=self.max_puntos)
         self.historial_pwm_motor = deque(maxlen=self.max_puntos)
@@ -124,7 +224,8 @@ class InterfazControl:
 
         self.crear_widgets()
         self.inicializar_graficas()
-        self.actualizar_interfaz()
+        self.bucle_control()
+        self.bucle_grafica()
 
     def crear_widgets(self):
         # [Se mantiene igual que la versión anterior]
@@ -158,12 +259,27 @@ class InterfazControl:
 
         frame_pid = ttk.LabelFrame(frame_izquierdo, text=" Parámetros PID ")
         frame_pid.pack(fill="x", pady=5)
-        ttk.Label(frame_pid, text="Kp:").grid(row=0, column=0, padx=5, pady=5)
-        ttk.Entry(frame_pid, textvariable=self.kp, width=7).grid(row=0, column=1, padx=5, pady=5)
-        ttk.Label(frame_pid, text="Ki:").grid(row=0, column=2, padx=5, pady=5)
-        ttk.Entry(frame_pid, textvariable=self.ki, width=7).grid(row=0, column=3, padx=5, pady=5)
-        ttk.Label(frame_pid, text="Kd:").grid(row=0, column=4, padx=5, pady=5)
-        ttk.Entry(frame_pid, textvariable=self.kd, width=7).grid(row=0, column=5, padx=5, pady=5)
+
+        self.frame_pid_temp = tk.Frame(frame_pid, bg="#f0f0f0")
+        self.frame_pid_temp.pack(fill="x", padx=5, pady=5)
+        ttk.Label(self.frame_pid_temp, text="PID Temperatura").grid(row=0, column=0, columnspan=6, sticky="w", pady=(0, 5))
+        ttk.Label(self.frame_pid_temp, text="Kp:").grid(row=1, column=0, padx=5, pady=5)
+        ttk.Entry(self.frame_pid_temp, textvariable=self.kp_temp, width=7).grid(row=1, column=1, padx=5, pady=5)
+        ttk.Label(self.frame_pid_temp, text="Ki:").grid(row=1, column=2, padx=5, pady=5)
+        ttk.Entry(self.frame_pid_temp, textvariable=self.ki_temp, width=7).grid(row=1, column=3, padx=5, pady=5)
+        ttk.Label(self.frame_pid_temp, text="Kd:").grid(row=1, column=4, padx=5, pady=5)
+        ttk.Entry(self.frame_pid_temp, textvariable=self.kd_temp, width=7).grid(row=1, column=5, padx=5, pady=5)
+
+        self.frame_pid_motor = tk.Frame(frame_pid, bg="#f0f0f0")
+        self.frame_pid_motor.pack(fill="x", padx=5, pady=5)
+        self.frame_pid_motor.pack_forget()
+        ttk.Label(self.frame_pid_motor, text="PID Motor").grid(row=0, column=0, columnspan=6, sticky="w", pady=(0, 5))
+        ttk.Label(self.frame_pid_motor, text="Kp:").grid(row=1, column=0, padx=5, pady=5)
+        ttk.Entry(self.frame_pid_motor, textvariable=self.kp_motor, width=7).grid(row=1, column=1, padx=5, pady=5)
+        ttk.Label(self.frame_pid_motor, text="Ki:").grid(row=1, column=2, padx=5, pady=5)
+        ttk.Entry(self.frame_pid_motor, textvariable=self.ki_motor, width=7).grid(row=1, column=3, padx=5, pady=5)
+        ttk.Label(self.frame_pid_motor, text="Kd:").grid(row=1, column=4, padx=5, pady=5)
+        ttk.Entry(self.frame_pid_motor, textvariable=self.kd_motor, width=7).grid(row=1, column=5, padx=5, pady=5)
 
         self.frame_ref = ttk.LabelFrame(frame_izquierdo, text=" Referencia Activa del Sistema ")
         self.frame_ref.pack(fill="x", pady=10)
@@ -197,24 +313,49 @@ class InterfazControl:
 
     def inicializar_graficas(self):
         self.fig = Figure(figsize=(8, 6), dpi=100)
-        self.ax_t_val = self.fig.add_subplot(221) 
-        self.ax_s_val = self.fig.add_subplot(222) 
-        self.ax_t_pwm = self.fig.add_subplot(223) 
-        self.ax_t_pwm.sharex(self.ax_t_val)
-        self.ax_s_pwm = self.fig.add_subplot(224)
-        self.ax_s_pwm.sharex(self.ax_s_val)
-
-        self.fig.tight_layout(pad=3.0)
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.frame_derecho)
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
+        self.ax_principal = None
+        self.ax_pwm = None
+        self._configurar_graficas()
+
+    def _configurar_graficas(self):
+        self.fig.clear()
+        self.ax_principal = self.fig.add_subplot(121)
+        self.ax_pwm = self.fig.add_subplot(122)
+
+        if self.sistema_activo.get() == "Temperatura":
+            self.ax_principal.set_title("Temperatura (Datos Reales)")
+            self.ax_principal.set_ylabel("°C")
+            self.ax_principal.set_ylim(25, 40)
+            self.ax_pwm.set_title("PWM Resistencia (%)")
+            self.ax_pwm.set_ylim(-5, 105)
+        else:
+            self.ax_principal.set_title("Evolución de Velocidad")
+            self.ax_principal.set_ylabel("RPM")
+            self.ax_principal.set_ylim(-20, 800)
+            self.ax_pwm.set_title("PWM Motor (%)")
+            self.ax_pwm.set_ylim(-5, 105)
+
+        self.ax_principal.grid(True)
+        self.ax_pwm.grid(True)
+        self.fig.tight_layout(pad=3.0)
+        if hasattr(self, "canvas"):
+            self.canvas.draw()
 
     def cambio_sistema(self, event=None):
         if self.sistema_activo.get() == "Temperatura":
             self.contenedor_motor.pack_forget()
             self.contenedor_temp.pack(fill="x", padx=5, pady=15)
+            self.frame_pid_motor.pack_forget()
+            self.frame_pid_temp.pack(fill="x", padx=5, pady=5)
         else:
             self.contenedor_temp.pack_forget()
             self.contenedor_motor.pack(fill="x", padx=5, pady=15)
+            self.frame_pid_temp.pack_forget()
+            self.frame_pid_motor.pack(fill="x", padx=5, pady=5)
+
+        self._configurar_graficas()
 
     def iniciar(self):
         if self.emergencia:
@@ -226,9 +367,12 @@ class InterfazControl:
             self.med_temp = None
             
             # Reiniciar memoria del PID
-            self.integral_error = 0.0
-            self.error_previo = 0.0
-            self.tiempo_previo = time.time()
+            self.integral_error_temp = 0.0
+            self.error_previo_temp = 0.0
+            self.tiempo_previo_temp = time.time()
+            self.integral_error_motor = 0.0
+            self.error_previo_motor = 0.0
+            self.tiempo_previo_motor = time.time()
             
             self.ejecutando = True
             self.btn_inicio.config(state="disabled")
@@ -243,8 +387,9 @@ class InterfazControl:
         self.btn_parada.config(state="disabled")
         self.pwm_temp_grafica = 0.0
         self.pwm_motor = 0.0
-        # Apagamos la resistencia por seguridad enviando un 0
-        self.backend.enviar_pwm(0)
+        # Apagamos la salida por seguridad enviando 0 con el prefijo correspondiente
+        tipo = "t" if self.sistema_activo.get() == "Temperatura" else "v"
+        self.backend.enviar_pwm(0, tipo=tipo)
         self.backend.desconectar()
 
     def parada_emergencia(self):
@@ -258,93 +403,148 @@ class InterfazControl:
     # ---------------------------------------------------------
     # EL NUEVO MÉTODO PID
     # ---------------------------------------------------------
-    def calcular_pid(self, setpoint, valor_medido):
-        """Aplica la matemática del PID y devuelve un PWM entre 0 y 255"""
-        tiempo_actual = time.time()
-        dt = tiempo_actual - self.tiempo_previo
-        if dt <= 0: dt = 0.01 # Evita errores de división por cero
+    # Límites físicos de la salida (duty cycle 0-255, con piso de 20
+    # para vencer la zona muerta de la resistencia/motor).
+    SALIDA_PWM_MIN = 20
+    SALIDA_PWM_MAX = 255
 
-        error = setpoint - valor_medido
-        
-        try:
-            kp = float(self.kp.get())
-            ki = float(self.ki.get())
-            kd = float(self.kd.get())
-        except ValueError:
-            kp, ki, kd = 0.0, 0.0, 0.0
+    def _pid_con_antiwindup(self, error, dt, kp, ki, kd, integral_previo, error_previo):
+        """Calcula P, I y D con anti-windup por integración condicionada.
 
-        # Acción Proporcional
+        En vez de solo recortar el acumulador integral a un rango fijo
+        (lo que permitía que el integrador siguiera creciendo mientras la
+        salida ya estaba topada en 20 o 255, y luego tardara en
+        'descargarse' cuando el error cambiaba de signo), aquí:
+          1. Se calcula qué saldría si integráramos este error.
+          2. Si esa salida ya se saldría de los límites físicos del PWM
+             Y el error sigue empujando en esa misma dirección, se
+             congela el integrador (no se acumula más).
+          3. Si el error empuja hacia dentro del rango (ayuda a salir de
+             la saturación), sí se integra normalmente.
+
+        Devuelve (salida_sin_clamp, nuevo_integral, P, I, D).
+        """
         P = kp * error
-        
-        # Acción Integral (Sumatoria del error)
-        self.integral_error += error * dt
-        # Limitar la integral (Anti-Windup) para evitar que crezca infinitamente
-        self.integral_error = max(-255, min(255, self.integral_error))
-        I = ki * self.integral_error
-        
-        # Acción Derivativa (Tasa de cambio del error)
-        D = kd * ((error - self.error_previo) / dt)
+        D = kd * ((error - error_previo) / dt)
 
-        # Ecuación completa
+        integral_tentativo = integral_previo + error * dt
+        salida_tentativa = P + ki * integral_tentativo + D
+
+        saturado_arriba = salida_tentativa > self.SALIDA_PWM_MAX
+        saturado_abajo = salida_tentativa < self.SALIDA_PWM_MIN
+
+        if (saturado_arriba and error > 0) or (saturado_abajo and error < 0):
+            # Salida ya saturada y el error empuja más hacia el mismo lado:
+            # no acumulamos (esto es lo que evita el windup).
+            integral_nuevo = integral_previo
+        else:
+            integral_nuevo = integral_tentativo
+
+        I = ki * integral_nuevo
         salida = P + I + D
+        return salida, integral_nuevo, P, I, D
 
-        # Guardar historial para el siguiente cálculo
-        self.error_previo = error
-        self.tiempo_previo = tiempo_actual
+    def calcular_pid(self, setpoint, valor_medido, modo=None):
+        """Aplica la matemática del PID (con anti-windup) y devuelve un PWM entre 0 y 255."""
+        modo = modo or self.sistema_activo.get()
+        tiempo_actual = time.time()
 
-        # Restringir matemáticamente entre 0 y 255
-        salida_pwm = max(0, min(255, int(salida)))
-        
+        if modo == "Temperatura":
+            dt = tiempo_actual - self.tiempo_previo_temp
+            if dt <= 0:
+                dt = 0.01
+            error = setpoint - valor_medido
+            try:
+                kp = float(self.kp_temp.get())
+                ki = float(self.ki_temp.get())
+                kd = float(self.kd_temp.get())
+            except ValueError:
+                kp, ki, kd = 0.0, 0.0, 0.0
+
+            salida, self.integral_error_temp, P, I, D = self._pid_con_antiwindup(
+                error, dt, kp, ki, kd, self.integral_error_temp, self.error_previo_temp
+            )
+            self.error_previo_temp = error
+            self.tiempo_previo_temp = tiempo_actual
+        else:
+            dt = tiempo_actual - self.tiempo_previo_motor
+            if dt <= 0:
+                dt = 0.01
+            error = setpoint - valor_medido
+            try:
+                kp = float(self.kp_motor.get())
+                ki = float(self.ki_motor.get())
+                kd = float(self.kd_motor.get())
+            except ValueError:
+                kp, ki, kd = 0.0, 0.0, 0.0
+
+            salida, self.integral_error_motor, P, I, D = self._pid_con_antiwindup(
+                error, dt, kp, ki, kd, self.integral_error_motor, self.error_previo_motor
+            )
+            self.error_previo_motor = error
+            self.tiempo_previo_motor = tiempo_actual
+
+        salida_pwm = max(self.SALIDA_PWM_MIN, min(self.SALIDA_PWM_MAX, int(salida)))
         return salida_pwm
     # ---------------------------------------------------------
 
-    def actualizar_interfaz(self):
+    def bucle_control(self):
+        """Lazo rápido (cada 50 ms): SOLO lee sensores, calcula el PID y
+        escribe el PWM por serial. Deliberadamente no toca matplotlib ni
+        hace más trabajo del necesario, para que nunca compita por CPU/GIL
+        con el hilo de lectura serial y así no se vuelva a saturar el
+        buffer de entrada."""
         if self.ejecutando:
             self.contador_tiempo += 1
-            nuevo_dato = self.backend.obtener_ultimo_dato()
-            
-            if nuevo_dato is not None:
-                self.med_temp = nuevo_dato
-            
+            temperatura_cruda = self.backend.obtener_temperatura_cruda()
+            velocidad_cruda = self.backend.obtener_velocidad_cruda()
+
+            if temperatura_cruda is not None:
+                self.med_temp = temperatura_cruda
+
+            if velocidad_cruda is not None:
+                self.med_speed = velocidad_cruda
+
             try: target_t = max(30.0, min(35.0, self.ref_temp.get()))
             except tk.TclError: target_t = 32.5
             try: target_s = max(0.0, min(750.0, self.ref_speed.get()))
             except tk.TclError: target_s = 350.0
 
-            self.lbl_temp_obj.config(text=f"Temp. Objetivo: {target_t:.2f} °C")
-            self.lbl_speed_obj.config(text=f"Vel. Objetivo: {target_s:.1f} RPM")
+            self.target_t = target_t
+            self.target_s = target_s
 
             # --- CONTROL Y ENVÍO ---
             if self.sistema_activo.get() == "Temperatura":
                 self.pwm_motor = 0.0
                 self.med_speed = max(0.0, self.med_speed - 10)
-                
+
                 if self.med_temp is not None:
-                    # 1. Calculamos el PID
-                    pwm_salida_cruda = self.calcular_pid(target_t, self.med_temp)
-                    
-                    # 2. Enviamos el valor (0-255) al Arduino
-                    self.backend.enviar_pwm(pwm_salida_cruda)
-                    
-                    # 3. Mapeamos a porcentaje (0-100%) solo para que la gráfica se vea bonita
-                    self.pwm_temp_grafica = (pwm_salida_cruda / 255.0) * 100.0
+                    pwm_salida_cruda = self.calcular_pid(target_t, self.med_temp, modo="Temperatura")
+                    self.backend.enviar_pwm(pwm_salida_cruda, tipo="t")
+                    # Graficamos lo que el backend confirma haber escrito en el
+                    # puerto (no lo que el PID acaba de calcular), para que la
+                    # gráfica sea coherente con lo que la resistencia recibió.
+                    pwm_confirmado = self.backend.obtener_pwm_actual("t")
+                    if pwm_confirmado is not None:
+                        self.pwm_temp_grafica = (pwm_confirmado / 255.0) * 100.0
             else:
-                error_s = target_s - self.med_speed
-                self.pwm_motor = max(0.0, min(100.0, (target_s / 7.5) + error_s * 0.1))
-                self.med_speed += (error_s * 0.3) + random.uniform(-2, 2)
-                if self.med_speed < 0: self.med_speed = 0.0
-                
-                self.pwm_temp_grafica = 0.0
-                self.backend.enviar_pwm(0) # Apaga la resistencia si estamos en modo motor
+                if self.med_speed is not None:
+                    pwm_salida_cruda = self.calcular_pid(target_s, self.med_speed, modo="Motor")
+                    self.backend.enviar_pwm(pwm_salida_cruda, tipo="v")
+                    # Idem: usamos el valor realmente confirmado por el backend,
+                    # no el recién calculado, para evitar que la gráfica muestre
+                    # cambios que en realidad se descartaron (dedupe/ack) y nunca
+                    # llegaron al motor.
+                    pwm_confirmado = self.backend.obtener_pwm_actual("v")
+                    if pwm_confirmado is not None:
+                        self.pwm_motor = (pwm_confirmado / 255.0) * 100.0
+                else:
+                    self.pwm_motor = 0.0
 
-            # --- ACTUALIZAR ETIQUETAS Y GRÁFICAS ---
-            if self.med_temp is not None:
-                self.lbl_temp_med.config(text=f"Temp. Medida: {self.med_temp:.2f} °C", foreground="blue")
-            
-            self.lbl_speed_med.config(text=f"Vel. Medida: {self.med_speed:.1f} RPM", foreground="green")
-
+            # Guardamos la historia aquí (es barato: solo deques), así la
+            # gráfica siempre tiene datos frescos aunque el redibujado vaya
+            # más lento.
             valor_temp_grafica = self.med_temp if self.med_temp is not None else 0.0
-            
             self.tiempo_x.append(self.contador_tiempo)
             self.historial_temp_ref.append(target_t)
             self.historial_temp_med.append(valor_temp_grafica)
@@ -353,44 +553,62 @@ class InterfazControl:
             self.historial_speed_med.append(self.med_speed)
             self.historial_pwm_motor.append(self.pwm_motor)
 
+        self.root.after(50, self.bucle_control)
+
+    def bucle_grafica(self):
+        """Lazo lento e independiente (cada ~250 ms): SOLO actualiza
+        etiquetas y redibuja matplotlib. Al vivir en su propio after()
+        separado del lazo de control, un redibujado lento nunca retrasa
+        el envío del PWM ni compite con él por CPU en el mismo tick."""
+        if self.ejecutando:
+            if self.med_temp is not None:
+                self.lbl_temp_med.config(text=f"Temp. Medida: {self.med_temp:.2f} °C", foreground="blue")
+            self.lbl_speed_med.config(text=f"Vel. Medida: {self.med_speed:.1f} RPM", foreground="green")
+            self.lbl_temp_obj.config(text=f"Temp. Objetivo: {self.target_t:.2f} °C")
+            self.lbl_speed_obj.config(text=f"Vel. Objetivo: {self.target_s:.1f} RPM")
+
             t_list = list(self.tiempo_x)
 
-            self.ax_t_val.clear()
-            self.ax_t_val.set_title("Temperatura (Datos Reales)")
-            self.ax_t_val.set_ylabel("°C")
-            self.ax_t_val.set_ylim(25, 40)
-            self.ax_t_val.grid(True)
-            self.ax_t_val.plot(t_list, list(self.historial_temp_ref), 'k--', label="Setpoint")
-            self.ax_t_val.plot(t_list, list(self.historial_temp_med), 'b-', linewidth=2, label="Medida")
-            self.ax_t_val.legend(loc="upper left")
+            self.ax_principal.clear()
+            self.ax_pwm.clear()
 
-            self.ax_s_val.clear()
-            self.ax_s_val.set_title("Evolución de Velocidad")
-            self.ax_s_val.set_ylabel("RPM")
-            self.ax_s_val.set_ylim(-20, 800)
-            self.ax_s_val.grid(True)
-            self.ax_s_val.plot(t_list, list(self.historial_speed_ref), 'k--', label="Setpoint")
-            self.ax_s_val.plot(t_list, list(self.historial_speed_med), 'g-', linewidth=2, label="Medida")
+            if self.sistema_activo.get() == "Temperatura":
+                self.ax_principal.set_title("Temperatura (Datos Reales)")
+                self.ax_principal.set_ylabel("°C")
+                self.ax_principal.set_ylim(25, 40)
+                self.ax_principal.grid(True)
+                self.ax_principal.plot(t_list, list(self.historial_temp_ref), 'k--', label="Setpoint")
+                self.ax_principal.plot(t_list, list(self.historial_temp_med), 'b-', linewidth=2, label="Medida")
+                self.ax_principal.legend(loc="upper left")
 
-            self.ax_t_pwm.clear()
-            self.ax_t_pwm.set_title("PWM Resistencia (%)")
-            self.ax_t_pwm.set_ylim(-5, 105)
-            self.ax_t_pwm.grid(True)
-            self.ax_t_pwm.plot(t_list, list(self.historial_pwm_temp), 'r-', linewidth=2)
+                self.ax_pwm.set_title("PWM Resistencia (%)")
+                self.ax_pwm.set_ylim(-5, 105)
+                self.ax_pwm.grid(True)
+                self.ax_pwm.plot(t_list, list(self.historial_pwm_temp), 'r-', linewidth=2)
+            else:
+                self.ax_principal.set_title("Evolución de Velocidad")
+                self.ax_principal.set_ylabel("RPM")
+                self.ax_principal.set_ylim(-20, 800)
+                self.ax_principal.grid(True)
+                self.ax_principal.plot(t_list, list(self.historial_speed_ref), 'k--', label="Setpoint")
+                self.ax_principal.plot(t_list, list(self.historial_speed_med), 'g-', linewidth=2, label="Medida")
+                self.ax_principal.legend(loc="upper left")
 
-            self.ax_s_pwm.clear()
-            self.ax_s_pwm.set_title("PWM Motor (%)")
-            self.ax_s_pwm.set_ylim(-5, 105)
-            self.ax_s_pwm.grid(True)
-            self.ax_s_pwm.plot(t_list, list(self.historial_pwm_motor), color="orange", linewidth=2)
+                self.ax_pwm.set_title("PWM Motor (%)")
+                self.ax_pwm.set_ylim(-5, 105)
+                self.ax_pwm.grid(True)
+                self.ax_pwm.plot(t_list, list(self.historial_pwm_motor), color="orange", linewidth=2)
 
-            self.canvas.draw()
+            # draw_idle() dibuja en el próximo ciclo ocioso de Tk en vez de
+            # forzar un render inmediato y bloqueante como draw().
+            self.canvas.draw_idle()
 
-        self.root.after(300, self.actualizar_interfaz)
+        self.root.after(250, self.bucle_grafica)
 
     def on_closing(self):
-        # Se envía un 0 para apagar la resistencia por precaución al cerrar el programa
-        self.backend.enviar_pwm(0)
+        # Se envía un 0 para apagar la salida por precaución al cerrar el programa
+        tipo = "t" if self.sistema_activo.get() == "Temperatura" else "v"
+        self.backend.enviar_pwm(0, tipo=tipo)
         self.backend.desconectar()
         self.root.destroy()
 

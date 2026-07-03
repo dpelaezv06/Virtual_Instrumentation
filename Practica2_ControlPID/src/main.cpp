@@ -13,7 +13,8 @@ int const pinPWM_Resistencia = 5;
 // Use an analog pin for LM35 (A0..A5). A0 equivale a 14 en Arduino UNO
 int const pinLM35 = A0;
 
-uint16_t temperaturaRawData = 0; // Variable para almacenar el valor de temperatura leido del LM35
+float temperaturaRawData = 0; // Variable para almacenar el valor de temperatura leido del LM35
+volatile float temperatura = 0.0;
 
 //Pines necesarios para el Driver del motor
 int const in1 = 2;
@@ -27,18 +28,54 @@ volatile long contador = 0;
 
 //Para hacer el muestreo cada 10 ms
 unsigned long tiempoAnterior = 0;
-const unsigned long Ts = 10000;   // 10 ms
+const unsigned long Ts = 10000; 
 
 
 //variables de control
-int duttycycle_PWM_Resistencia = 0;
-int duttycycle_PWM_in1 = 254;
-int duttycycle_PWM_in2 = 0;
+volatile int duttycycle_PWM_Resistencia = 0;
+volatile int duttycycle_PWM_in1 = 255;
+volatile int duttycycle_PWM_in2 = 0;
+String serialBuffer = "";
 
 //funciones en temperatura
 float leerTemperaturaRawData() {
   int valor_analogico = analogRead(pinLM35);
-  return valor_analogico;
+  temperatura = ((valor_analogico * 5.0 / 1023.0) * 100.0)-6; // Convertir a grados Celsius
+  return temperatura;
+}
+
+void procesarComandoSerial(const String &comando) {
+  if (comando.startsWith("t_")) {
+    int valor = comando.substring(2).toInt();
+    if (valor >= 0 && valor <= 255) {
+      duttycycle_PWM_Resistencia = valor;
+      Serial.println("ack_t");
+    }
+  } else if (comando.startsWith("v_")) {
+    int valor = comando.substring(2).toInt();
+    if (valor >= 0 && valor <= 255) {
+      duttycycle_PWM_in1 = valor;
+      Serial.println("ack_v");
+    }
+  }
+}
+
+void leerComandoSerial() {
+  while (Serial.available() > 0) {
+    char c = Serial.read();
+    if (c == '\n') {
+      serialBuffer.trim();
+      if (serialBuffer.length() > 0) {
+        procesarComandoSerial(serialBuffer);
+      }
+      serialBuffer = "";
+    } else if (c != '\r') {
+      serialBuffer += c;
+      if (serialBuffer.length() > 64) {
+        serialBuffer = ""; // evitar saturación con datos no válidos
+      }
+    }
+  }
 }
 
 // Inicializa un pin para PWM en Arduino UNO R4 WiFi
@@ -68,7 +105,7 @@ void setup() {
   initPWM(pinPWM_Resistencia);
   initPWM(in1);
   initPWM(in2);
-  pinMode(pinEncoder, INPUT); // Configurar el pin del encoder como entrada con resistencia pull-up interna
+  pinMode(pinEncoder, INPUT_PULLUP); // Configurar el pin del encoder con resistencia pull-up interna
 
   // Configurar interrupción para el pin del encoder
   attachInterrupt(digitalPinToInterrupt(pinEncoder), encoderISR, RISING);
@@ -82,36 +119,30 @@ void setup() {
 
 
 void loop() {
-  /* Leemos la temperatura */
+  /* Leemos la temperatura en cada ciclo, pero NO la enviamos todavía
+     (se envía más abajo, sincronizada con la ventana Ts) */
   temperaturaRawData = leerTemperaturaRawData();
 
-  /* ENVIAR CON PROTOCOLO DE SINCRONIZACIÓN */
-  Serial.write(' '); // 1. Byte de cabecera para sincronizar
-  Serial.write((uint8_t*)&temperaturaRawData, sizeof(temperaturaRawData)); // 2. Enviar los 2 bytes del uint16_t
+  /* Leer comandos PWM entrantes separados por línea. Se llama en cada
+     vuelta del loop (sin delay bloqueante) para vaciar el buffer RX
+     tan rápido como llegan los datos y evitar que se acumulen */
+  leerComandoSerial();
 
-  /* Esperamos la orden del dutty cicle que debemos poner por serial */
+  /* Aplicar PWM de la resistencia y del motor */
+  setPWMDuty(pinPWM_Resistencia, duttycycle_PWM_Resistencia);
+  setPWMDuty(in1, duttycycle_PWM_in1);
 
-  if (Serial.available() >= 1) {
-    // Leemos el dutty cycle enviado por el PC (1 byte)
-    duttycycle_PWM_Resistencia = Serial.read();
-    // Establecemos el dutty cycle en el pin de la resistencia
-    setPWMDuty(pinPWM_Resistencia, duttycycle_PWM_Resistencia);
+  if (micros() - tiempoAnterior >= Ts) {
+    tiempoAnterior += Ts;
+
+    Serial.print("t_");
+    Serial.println(temperaturaRawData);
+
+    // Leer encoder
+    long velocidad = (contador * 60)/(140*0.01); // Velocidad en pulsos por segundo (pulsos/s)
+    Serial.print("v_");
+    Serial.println(velocidad);
+    contador = 0; // Reiniciar contador para la siguiente medición
   }
 
-
-  delay(50); // 3. Pausa de 50ms (envía ~20 lecturas por segundo, ideal para temperatura)
-  setPWMDuty(in1, duttycycle_PWM_in1);
-  setPWMDuty(in2, duttycycle_PWM_in2);
-
-  if (micros() - tiempoAnterior >= Ts)
-    {
-      //actualizamos el tiempo anterior
-        tiempoAnterior += Ts;
-
-        // Leer encoder
-        long velocidad = (contador * 60)/(700*0.01); // Velocidad en pulsos por segundo (pulsos/s)
-        Serial.println("velocidad: " + String(velocidad)); // Enviar velocidad al PC
-        contador = 0; // Reiniciar contador para la siguiente medición
-        
-    }
-}
+  }
