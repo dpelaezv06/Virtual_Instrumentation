@@ -49,59 +49,51 @@ class ControladorSerial:
             self.conexion.close()
 
     def _bucle_lectura(self):
-        """Lee datos seriales con prefijos t_ y v_ para temperatura y velocidad."""
+        """Lee datos de forma eficiente sin retrasos artificiales."""
         while self.hilo_activo:
             if self.conexion and self.conexion.is_open:
                 try:
+                    # readline() espera de forma nativa a que llegue el '\n'
                     linea = self.conexion.readline()
                     if not linea:
-                        time.sleep(0.01)
                         continue
 
                     dato = linea.decode("utf-8", errors="ignore").strip()
                     if not dato:
                         continue
 
-                    if len(linea) > 128:
-                        continue
-
                     if dato.startswith("ack_t"):
                         with self.lock:
                             if self.ultimo_tipo_enviado == "t":
                                 self.pendiente_ack = False
-                        continue
-
+                    
                     elif dato.startswith("ack_v"):
                         with self.lock:
                             if self.ultimo_tipo_enviado == "v":
                                 self.pendiente_ack = False
-                        continue
 
                     elif dato.startswith("t_"):
-                        valor = dato[2:]
                         try:
-                            temperatura_cruda = float(valor)
+                            valor = float(dato[2:])
+                            with self.lock:
+                                self.temperatura_cruda = valor
+                                self.ultimo_dato = valor
                         except ValueError:
                             continue
-
-                        with self.lock:
-                            self.temperatura_cruda = temperatura_cruda
-                            self.ultimo_dato = temperatura_cruda
 
                     elif dato.startswith("v_"):
-                        valor = dato[2:]
                         try:
-                            velocidad_cruda = float(valor)
+                            valor = float(dato[2:])
+                            with self.lock:
+                                self.velocidad_cruda = valor
+                                self.ultimo_dato = valor
                         except ValueError:
                             continue
-
-                        with self.lock:
-                            self.velocidad_cruda = velocidad_cruda
-                            self.ultimo_dato = velocidad_cruda
 
                 except Exception:
                     pass
-            time.sleep(0.01)
+            else:
+                time.sleep(0.1) # Si no está abierto el puerto, espera un poco
 
     def enviar_pwm(self, pwm_valor, tipo=None):
         """Envía un PWM sobre serial usando prefijos t_ o v_ y espera ack para no saturar el puerto."""
@@ -405,7 +397,7 @@ class InterfazControl:
     # ---------------------------------------------------------
     # Límites físicos de la salida (duty cycle 0-255, con piso de 20
     # para vencer la zona muerta de la resistencia/motor).
-    SALIDA_PWM_MIN = 20
+    SALIDA_PWM_MIN = 40
     SALIDA_PWM_MAX = 255
 
     def _pid_con_antiwindup(self, error, dt, kp, ki, kd, integral_previo, error_previo):
@@ -489,11 +481,7 @@ class InterfazControl:
     # ---------------------------------------------------------
 
     def bucle_control(self):
-        """Lazo rápido (cada 50 ms): SOLO lee sensores, calcula el PID y
-        escribe el PWM por serial. Deliberadamente no toca matplotlib ni
-        hace más trabajo del necesario, para que nunca compita por CPU/GIL
-        con el hilo de lectura serial y así no se vuelva a saturar el
-        buffer de entrada."""
+        """Lazo de control sincronizado a 30ms con el Arduino."""
         if self.ejecutando:
             self.contador_tiempo += 1
             temperatura_cruda = self.backend.obtener_temperatura_cruda()
@@ -501,7 +489,6 @@ class InterfazControl:
 
             if temperatura_cruda is not None:
                 self.med_temp = temperatura_cruda
-
             if velocidad_cruda is not None:
                 self.med_speed = velocidad_cruda
 
@@ -513,17 +500,11 @@ class InterfazControl:
             self.target_t = target_t
             self.target_s = target_s
 
-            # --- CONTROL Y ENVÍO ---
             if self.sistema_activo.get() == "Temperatura":
                 self.pwm_motor = 0.0
-                self.med_speed = max(0.0, self.med_speed - 10)
-
                 if self.med_temp is not None:
                     pwm_salida_cruda = self.calcular_pid(target_t, self.med_temp, modo="Temperatura")
                     self.backend.enviar_pwm(pwm_salida_cruda, tipo="t")
-                    # Graficamos lo que el backend confirma haber escrito en el
-                    # puerto (no lo que el PID acaba de calcular), para que la
-                    # gráfica sea coherente con lo que la resistencia recibió.
                     pwm_confirmado = self.backend.obtener_pwm_actual("t")
                     if pwm_confirmado is not None:
                         self.pwm_temp_grafica = (pwm_confirmado / 255.0) * 100.0
@@ -531,19 +512,11 @@ class InterfazControl:
                 if self.med_speed is not None:
                     pwm_salida_cruda = self.calcular_pid(target_s, self.med_speed, modo="Motor")
                     self.backend.enviar_pwm(pwm_salida_cruda, tipo="v")
-                    # Idem: usamos el valor realmente confirmado por el backend,
-                    # no el recién calculado, para evitar que la gráfica muestre
-                    # cambios que en realidad se descartaron (dedupe/ack) y nunca
-                    # llegaron al motor.
                     pwm_confirmado = self.backend.obtener_pwm_actual("v")
                     if pwm_confirmado is not None:
                         self.pwm_motor = (pwm_confirmado / 255.0) * 100.0
-                else:
-                    self.pwm_motor = 0.0
 
-            # Guardamos la historia aquí (es barato: solo deques), así la
-            # gráfica siempre tiene datos frescos aunque el redibujado vaya
-            # más lento.
+            # Guardar historial
             valor_temp_grafica = self.med_temp if self.med_temp is not None else 0.0
             self.tiempo_x.append(self.contador_tiempo)
             self.historial_temp_ref.append(target_t)
@@ -553,7 +526,8 @@ class InterfazControl:
             self.historial_speed_med.append(self.med_speed)
             self.historial_pwm_motor.append(self.pwm_motor)
 
-        self.root.after(50, self.bucle_control)
+        # CAMBIO: Ejecutar cada 30 ms en vez de 50 ms para emparejar la lectura
+        self.root.after(30, self.bucle_control)
 
     def bucle_grafica(self):
         """Lazo lento e independiente (cada ~250 ms): SOLO actualiza
