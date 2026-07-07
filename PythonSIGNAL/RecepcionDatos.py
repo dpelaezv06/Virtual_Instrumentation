@@ -6,6 +6,7 @@ import threading
 from collections import deque
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import numpy as np
 
 try:
     from serial import Serial
@@ -220,7 +221,6 @@ class InterfazControl:
         self.bucle_grafica()
 
     def crear_widgets(self):
-        # [Se mantiene igual que la versión anterior]
         frame_superior = ttk.LabelFrame(self.root, text=" Configuración General y Control ")
         frame_superior.pack(fill="x", padx=15, pady=10)
 
@@ -289,16 +289,28 @@ class InterfazControl:
         frame_display.pack(fill="both", expand=True, pady=5)
 
         self.lbl_temp_obj = ttk.Label(frame_display, text="Temp. Objetivo: --", font=("Helvetica", 11))
-        self.lbl_temp_obj.pack(anchor="w", padx=15, pady=5)
+        self.lbl_temp_obj.pack(anchor="w", padx=15, pady=2)
         self.lbl_temp_med = ttk.Label(frame_display, text="Temp. Medida: Esperando datos...", font=("Helvetica", 12, "bold"), foreground="orange")
-        self.lbl_temp_med.pack(anchor="w", padx=15, pady=5)
+        self.lbl_temp_med.pack(anchor="w", padx=15, pady=2)
         
+        # Nuevas etiquetas para errores de Temperatura
+        self.lbl_temp_err_abs = ttk.Label(frame_display, text="Error Absoluto: --", font=("Helvetica", 10))
+        self.lbl_temp_err_abs.pack(anchor="w", padx=15, pady=1)
+        self.lbl_temp_err_rel = ttk.Label(frame_display, text="Error Relativo: --", font=("Helvetica", 10))
+        self.lbl_temp_err_rel.pack(anchor="w", padx=15, pady=1)
+
         ttk.Separator(frame_display, orient="horizontal").pack(fill="x", padx=10, pady=10)
 
         self.lbl_speed_obj = ttk.Label(frame_display, text="Vel. Objetivo: --", font=("Helvetica", 11))
-        self.lbl_speed_obj.pack(anchor="w", padx=15, pady=5)
+        self.lbl_speed_obj.pack(anchor="w", padx=15, pady=2)
         self.lbl_speed_med = ttk.Label(frame_display, text="Vel. Medida: 0.0 RPM", font=("Helvetica", 12, "bold"), foreground="green")
-        self.lbl_speed_med.pack(anchor="w", padx=15, pady=5)
+        self.lbl_speed_med.pack(anchor="w", padx=15, pady=2)
+        
+        # Nuevas etiquetas para errores de Motor
+        self.lbl_speed_err_abs = ttk.Label(frame_display, text="Error Absoluto: --", font=("Helvetica", 10))
+        self.lbl_speed_err_abs.pack(anchor="w", padx=15, pady=1)
+        self.lbl_speed_err_rel = ttk.Label(frame_display, text="Error Relativo: --", font=("Helvetica", 10))
+        self.lbl_speed_err_rel.pack(anchor="w", padx=15, pady=1)
 
         self.frame_derecho = ttk.LabelFrame(self.root, text=" Gráficas Dinámicas del Sistema ")
         self.frame_derecho.pack(side="right", fill="both", expand=True, padx=15, pady=10)
@@ -401,21 +413,7 @@ class InterfazControl:
     SALIDA_PWM_MAX = 255
 
     def _pid_con_antiwindup(self, error, dt, kp, ki, kd, integral_previo, error_previo):
-        """Calcula P, I y D con anti-windup por integración condicionada.
-
-        En vez de solo recortar el acumulador integral a un rango fijo
-        (lo que permitía que el integrador siguiera creciendo mientras la
-        salida ya estaba topada en 20 o 255, y luego tardara en
-        'descargarse' cuando el error cambiaba de signo), aquí:
-          1. Se calcula qué saldría si integráramos este error.
-          2. Si esa salida ya se saldría de los límites físicos del PWM
-             Y el error sigue empujando en esa misma dirección, se
-             congela el integrador (no se acumula más).
-          3. Si el error empuja hacia dentro del rango (ayuda a salir de
-             la saturación), sí se integra normalmente.
-
-        Devuelve (salida_sin_clamp, nuevo_integral, P, I, D).
-        """
+        """Calcula P, I y D con anti-windup por integración condicionada."""
         P = kp * error
         D = kd * ((error - error_previo) / dt)
 
@@ -426,8 +424,6 @@ class InterfazControl:
         saturado_abajo = salida_tentativa < self.SALIDA_PWM_MIN
 
         if (saturado_arriba and error > 0) or (saturado_abajo and error < 0):
-            # Salida ya saturada y el error empuja más hacia el mismo lado:
-            # no acumulamos (esto es lo que evita el windup).
             integral_nuevo = integral_previo
         else:
             integral_nuevo = integral_tentativo
@@ -526,18 +522,43 @@ class InterfazControl:
             self.historial_speed_med.append(self.med_speed)
             self.historial_pwm_motor.append(self.pwm_motor)
 
-        # CAMBIO: Ejecutar cada 30 ms en vez de 50 ms para emparejar la lectura
         self.root.after(30, self.bucle_control)
 
+    def _formatear_dos_cifras_sig(self, valor):
+        """Devuelve una cadena con el valor formateado a exactamente 2 cifras significativas."""
+        if valor == 0:
+            return "0.0"
+        from math import log10, floor
+        # Determina la posición de la primera cifra significativa
+        orden = floor(log10(abs(valor)))
+        decimales = 1 - orden
+        if decimales < 0:
+            decimales = 0
+        return f"{valor:.{decimales}f}"
+
     def bucle_grafica(self):
-        """Lazo lento e independiente (cada ~250 ms): SOLO actualiza
-        etiquetas y redibuja matplotlib. Al vivir en su propio after()
-        separado del lazo de control, un redibujado lento nunca retrasa
-        el envío del PWM ni compite con él por CPU en el mismo tick."""
+        """Lazo lento e independiente (cada ~250 ms) para renderizado de UI."""
         if self.ejecutando:
+            # 1. Cálculos e informes de Temperatura
             if self.med_temp is not None:
-                self.lbl_temp_med.config(text=f"Temp. Medida: {self.med_temp:.2f} °C", foreground="blue")
-            self.lbl_speed_med.config(text=f"Vel. Medida: {self.med_speed:.1f} RPM", foreground="green")
+                incertidumbre_t_str = self._formatear_dos_cifras_sig(0.5)
+                self.lbl_temp_med.config(text=f"Temp. Medida: ({self.med_temp:.2f} ± {incertidumbre_t_str}) °C", foreground="blue")
+                
+                err_abs_t = abs(self.target_t - self.med_temp)
+                err_rel_t = (err_abs_t * 100.0 / self.target_t) if self.target_t != 0 else 0.0
+                self.lbl_temp_err_abs.config(text=f"Error Absoluto: {err_abs_t:.2f} °C")
+                self.lbl_temp_err_rel.config(text=f"Error Relativo: {err_rel_t:.2f} %")
+            
+            # 2. Cálculos e informes del Motor (Velocidad)
+            incert_v_cruda = abs(self.med_speed) * (6.25e-8) * 60.0*np.sqrt(2)
+            incertidumbre_v_str = self._formatear_dos_cifras_sig(incert_v_cruda)
+            self.lbl_speed_med.config(text=f"Vel. Medida: ({self.med_speed:.1f} ± {incertidumbre_v_str}) RPM", foreground="green")
+            
+            err_abs_v = abs(self.target_s - self.med_speed)
+            err_rel_v = (err_abs_v * 100.0 / self.target_s) if self.target_s != 0 else 0.0
+            self.lbl_speed_err_abs.config(text=f"Error Absoluto: {err_abs_v:.1f} RPM")
+            self.lbl_speed_err_rel.config(text=f"Error Relativo: {err_rel_v:.2f} %")
+
             self.lbl_temp_obj.config(text=f"Temp. Objetivo: {self.target_t:.2f} °C")
             self.lbl_speed_obj.config(text=f"Vel. Objetivo: {self.target_s:.1f} RPM")
 
@@ -573,14 +594,11 @@ class InterfazControl:
                 self.ax_pwm.grid(True)
                 self.ax_pwm.plot(t_list, list(self.historial_pwm_motor), color="orange", linewidth=2)
 
-            # draw_idle() dibuja en el próximo ciclo ocioso de Tk en vez de
-            # forzar un render inmediato y bloqueante como draw().
             self.canvas.draw_idle()
 
         self.root.after(250, self.bucle_grafica)
 
     def on_closing(self):
-        # Se envía un 0 para apagar la salida por precaución al cerrar el programa
         tipo = "t" if self.sistema_activo.get() == "Temperatura" else "v"
         self.backend.enviar_pwm(0, tipo=tipo)
         self.backend.desconectar()
