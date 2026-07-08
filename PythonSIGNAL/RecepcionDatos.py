@@ -409,7 +409,8 @@ class InterfazControl:
     # ---------------------------------------------------------
     # Límites físicos de la salida (duty cycle 0-255, con piso de 20
     # para vencer la zona muerta de la resistencia/motor).
-    SALIDA_PWM_MIN = 40
+    SALIDA_PWM_MIN = 1
+    
     SALIDA_PWM_MAX = 255
 
     def _pid_con_antiwindup(self, error, dt, kp, ki, kd, integral_previo, error_previo):
@@ -541,7 +542,7 @@ class InterfazControl:
         if self.ejecutando:
             # 1. Cálculos e informes de Temperatura
             if self.med_temp is not None:
-                incertidumbre_t_str = self._formatear_dos_cifras_sig(0.5)
+                incertidumbre_t_str = self._formatear_dos_cifras_sig(0.5 * np.sqrt(2))
                 self.lbl_temp_med.config(text=f"Temp. Medida: ({self.med_temp:.2f} ± {incertidumbre_t_str}) °C", foreground="blue")
                 
                 err_abs_t = abs(self.target_t - self.med_temp)
