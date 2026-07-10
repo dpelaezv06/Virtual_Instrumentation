@@ -1,6 +1,7 @@
 import serial
 import threading
 import time
+import re
 
 class ArduinoBackend:
     def __init__(self, puerto='/dev/ttyACM0', baud_rate=115200):
@@ -8,7 +9,7 @@ class ArduinoBackend:
         self.baud_rate = baud_rate
         self.serial_conn = None
         self.temperatura_actual = "--"
-        self.color_actual = "gray"  # Color inicial para el cuadrado virtual
+        self.color_actual = "gray"
         self.ejecutando = False
         self.hilo_lectura = None
 
@@ -27,40 +28,45 @@ class ArduinoBackend:
             trama = f"{comando}_"
             self.serial_conn.write(trama.encode('utf-8'))
             print(f"Backend enviando: {trama}")
-            
-            # Mapeamos el comando enviado con el color que debe mostrar el cuadrado
-            self._actualizar_color_virtual(comando)
         else:
             print("Error: El puerto serial no está abierto.")
 
-    def _actualizar_color_virtual(self, comando):
-        """Traduce el comando del Arduino a un color comprensible por Tkinter."""
-        mapa_colores = {
-            "escalaAzul": "blue", "colorAzul": "blue",
-            "escalaRojo": "red", "colorRojo": "red",
-            "escalaVerde": "green", "colorVerde": "green",
-            "colorBlanco": "white",
-            "colorVioleta": "purple",
-            "colorAmarillo": "yellow",
-            "escalaPolicromatico": "cyan",  # Usamos cyan para representar el policromático en pantalla
-            "OFF": "gray"
-        }
-        if comando in mapa_colores:
-            self.color_actual = mapa_colores[comando]
-
     def _leer_serial_continuo(self):
+        # Expresión regular para extraer los valores R, B y G permitiendo números negativos
+        # (El Arduino los envía en el orden R, B, G según el firmware)
+        patron_rgb = re.compile(r"R(-?\d+)B(-?\d+)G(-?\d+)")
+
         while self.ejecutando and self.serial_conn and self.serial_conn.is_open:
             try:
                 if self.serial_conn.in_waiting > 0:
                     linea = self.serial_conn.readline().decode('utf-8').strip()
+                    
                     if linea.startswith("t_"):
+                        # Extraemos la temperatura
                         self.temperatura_actual = linea.split('_')[1]
+                    
+                    elif linea.startswith("R"):
+                        # Extraemos el color calculado por el Arduino
+                        match = patron_rgb.match(linea)
+                        if match:
+                            r, b, g = map(int, match.groups())
+                            
+                            # Limitamos los valores entre 0 y 255 (Tkinter no soporta colores fuera de este rango)
+                            r = max(0, min(255, r))
+                            g = max(0, min(255, g))
+                            b = max(0, min(255, b))
+                            
+                            # Formateamos a Hexadecimal (ej: #FF00AA)
+                            self.color_actual = f"#{r:02x}{g:02x}{b:02x}"
+                            
             except Exception as e:
-                print(f"Error de lectura en backend: {e}")
-            time.sleep(0.05)
+                # Ignoramos pequeños errores de lectura inicial por sincronización
+                pass
+            
+            # Pausa muy pequeña (10ms) porque ahora recibimos datos a 20Hz
+            time.sleep(0.01)
 
     def obtener_datos(self):
-        """Devuelve la temperatura y el color actual para el frontend."""
         return self.temperatura_actual, self.color_actual
 
     def desconectar(self):
