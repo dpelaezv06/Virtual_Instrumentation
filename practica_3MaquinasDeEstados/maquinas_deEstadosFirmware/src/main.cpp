@@ -22,10 +22,9 @@ void controlarLedRGB(int dutyRed, int dutyGreen, int dutyBlue);
 int calcular_duttyMonocromatico(float p_temp);
 void maquinaEstados();
 void miFuncionInterrupcion(timer_callback_args_t *args);
+void configurarTimer(float frecuenciaHz);
 
 float temp = 0.0; // Variable para almacenar la temperatura leída del LM35
-RGB dutty = {0, 0, 0}; // Estructura para almacenar los valores de cada LED
-
 String mensajeRecibido = "";     // Aquí se guardará el texto final (sin el '_')
 String bufferTemporal = "";      // Va acumulando los caracteres que van llegando
 
@@ -77,6 +76,8 @@ struct RGB {
     int g;
     int b;
 };
+
+RGB dutty = {0, 0, 0}; // Estructura para almacenar los valores de cada LED
 
 RGB calcularDutyCycleRGB(float p_temp);
 

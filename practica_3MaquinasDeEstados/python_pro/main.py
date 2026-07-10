@@ -1,6 +1,6 @@
 import tkinter as tk
-from backend import ArduinoBackend
-from frontend import ArduinoApp
+from backEnd import ArduinoBackend
+from frontEnd import ArduinoApp
 
 def main():
     # 1. Crear la ventana principal de Tkinter
