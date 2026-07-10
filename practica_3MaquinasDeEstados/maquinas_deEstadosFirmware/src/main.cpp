@@ -1,7 +1,10 @@
 #include <Arduino.h>
+#include "FspTimer.h"
+
+// Instancia global del temporizador
+FspTimer temporizador;
 
 const int PIN_SENSOR_TOQUE = 2; // Pin digital con soporte de interrupción
-volatile bool eventoDetectado = false; // flag para indicar que se detectó un evento de toque
 const int PIN_LM35 = A0; // Pin analógico para el LM35
 const int PIN_RESISTENCIA = 8; // Pin digital conectado al transistor/relé de la resistencia
 const int PIN_RED   = 11; 
@@ -16,8 +19,12 @@ float leerTemperaturaLM35();
 void controlarResistenciaSerial();
 void controlarLedRGB(int dutyRed, int dutyGreen, int dutyBlue);
 void controlarLedRGB(int dutyRed, int dutyGreen, int dutyBlue);
+int calcular_duttyMonocromatico(float p_temp);
+void maquinaEstados();
+void miFuncionInterrupcion(timer_callback_args_t *args);
 
 float temp = 0.0; // Variable para almacenar la temperatura leída del LM35
+RGB dutty = {0, 0, 0}; // Estructura para almacenar los valores de cada LED
 
 String mensajeRecibido = "";     // Aquí se guardará el texto final (sin el '_')
 String bufferTemporal = "";      // Va acumulando los caracteres que van llegando
@@ -25,8 +32,7 @@ String bufferTemporal = "";      // Va acumulando los caracteres que van llegand
 //Estados posibles de la máquina de estados
 typedef enum {
   interpretarComando,
-  RGB_resistencia,
-  RGB_toque,
+  controlRGB,
   enviarTemperatura,
   encenderResistencia,
   apagarResistencia,
@@ -57,9 +63,22 @@ typedef enum{
 }colorLED_Toque;
 colorLED_Toque colorToque = azulToque; // Color inicial para el LED RGB al detectar un toque
 
+typedef enum{
+  controlResistencia,
+  controlToque,
+}tipoControl;
+tipoControl control = controlResistencia; // Control inicial
+
 Estado estadoActual = interpretarComando; // Estado inicial
 
+// Estructura para almacenar los valores de cada LED
+struct RGB {
+    int r;
+    int g;
+    int b;
+};
 
+RGB calcularDutyCycleRGB(float p_temp);
 
 
 void setup() {
@@ -71,6 +90,7 @@ void setup() {
   pinMode(PIN_BLUE, OUTPUT);
   Serial.begin(115200);
   digitalWrite(PIN_RESISTENCIA, LOW);
+  configurarTimer(20.0f);
 
 }
 
@@ -86,10 +106,10 @@ void maquinaEstados() {
     case interpretarComando:
    ; // Leer hasta el final de línea
       if (mensajeRecibido == "R") {
-        estadoActual = RGB_resistencia;
+        control = controlResistencia;
       } 
       else if (mensajeRecibido  == "T") {
-        estadoActual = RGB_toque;
+        control = controlToque;
       }
       else if (mensajeRecibido == "ON") {
         estadoActual = enviarTemperatura;
@@ -110,22 +130,22 @@ void maquinaEstados() {
         color = policromatico;
       }
       else if (mensajeRecibido == "colorAzul") {
-        colorLED_Toque color = azulToque;
+        colorToque = azulToque;
       }
       else if (mensajeRecibido == "colorRojo") {
-        colorLED_Toque color = rojoToque;
+        colorToque= rojoToque;
       }
       else if (mensajeRecibido == "colorVerde") {
-        colorLED_Toque color = verdeToque;
+        colorToque= verdeToque;
       }
       else if (mensajeRecibido == "colorBlanco") {
-        colorLED_Toque color = blancoToque;
+        colorToque= blancoToque;
       }
       else if (mensajeRecibido == "colorVioleta") {
-        colorLED_Toque color = violetaToque;
+        colorToque= violetaToque;
       }
       else if (mensajeRecibido == "colorAmarillo") {
-        colorLED_Toque color = amarilloToque;
+        colorToque = amarilloToque;
       }
       else {
         // Comando no reconocido, volver a IDLE
@@ -135,46 +155,81 @@ void maquinaEstados() {
       estadoActual = IDLE;
       break;
 
-    case RGB_resistencia:
-      temp = leerTemperaturaLM35();
-      switch (color) {
-        case azul:
-          controlarLedRGB(0, 0, 255); // Azul
-          break;
-        case rojo:
-          controlarLedRGB(255, 0, 0); // Rojo
-          break;
-        case verde:
-          controlarLedRGB(0, 255, 0); // Verde
-          break;
-        case policromatico:
-          // Cambiar colores de manera cíclica
-          for (int i = 0; i < 3; i++) {
-            controlarLedRGB(255, 0, 0); // Rojo
-            delay(500);
-            controlarLedRGB(0, 255, 0); // Verde
-            delay(500);
-            controlarLedRGB(0, 0, 255); // Azul
-            delay(500);
-          }
-          break;
-      }
-      estadoActual = IDLE;
-      break;
+    case controlRGB:
+    switch (control) {
+      case controlResistencia:
 
-    case RGB_toque:
-      if (leerEstadoSensor()) {
-        // Cambiar color del LED RGB al detectar un toque
-        controlarLedRGB(255, 0, 0); // Ejemplo: rojo
-        delay(500); // Mantener el color por un tiempo
-        controlarLedRGB(0, 0, 0);   // Apagar LED
+      switch (color) {
+
+        case azul:
+        dutty.b = calcular_duttyMonocromatico(temp);
+        controlarLedRGB(0, 0, dutty.b);
+        estadoActual = IDLE; // Cambiar al estado de enviar temperatura
+        break;
+
+        case rojo:
+            dutty.r = calcular_duttyMonocromatico(temp);
+            controlarLedRGB(dutty.r, 0, 0);
+            estadoActual = IDLE; // Cambiar al estado de enviar temperatura
+          break;
+
+        case verde:
+            dutty.g = calcular_duttyMonocromatico(temp);
+            controlarLedRGB(0, dutty.g, 0);
+            estadoActual = IDLE; // Cambiar al estado de enviar temperatura
+          break;
+
+
+        case policromatico:
+            calcularDutyCycleRGB(temp);
+            estadoActual = IDLE; // Cambiar al estado de enviar temperatura
+ 
+          break;
       }
       estadoActual = IDLE;
       break;
+      case controlToque:
+      switch (colorToque) {
+        case azulToque:
+          controlarLedRGB(0, 0, 255);
+          estadoActual = IDLE;
+          break;
+        case rojoToque:
+          controlarLedRGB(255, 0, 0);
+          estadoActual = IDLE;
+          break;
+        case verdeToque:
+          controlarLedRGB(0, 255, 0);
+          estadoActual = IDLE;
+          break;
+        case blancoToque:
+          controlarLedRGB(255, 255, 255);
+          estadoActual = IDLE;
+          break;
+        case violetaToque:
+          controlarLedRGB(180, 0, 255);
+          estadoActual = IDLE;
+          break;
+        case amarilloToque:
+          controlarLedRGB(255, 255, 0);
+          estadoActual = IDLE;
+          break;
+      }
+      break;
+    }
+    break;
+
 
     case enviarTemperatura:
+      temp = leerTemperaturaLM35();
       Serial.print("t_");
       Serial.println(temp, 2);
+      Serial.print("R");
+      Serial.print(dutty.r);
+      Serial.print("B");
+      Serial.print(dutty.b);
+      Serial.print("G");
+      Serial.println(dutty.g);
       estadoActual = IDLE;
       break;
     
@@ -194,17 +249,7 @@ void maquinaEstados() {
 }
 // --- Función de Interrupción (ISR) ---
 void ISR_sensorToque() {
-  // Esta función debe ser lo más corta y rápida posible
-  eventoDetectado = true;
-}
-
-// --- Función individual para verificar el estado en tu loop() ---
-bool leerEstadoSensor() {
-  if (eventoDetectado) {
-    eventoDetectado = false; // Reiniciamos la bandera
-    return true;             // Hubo un toque/evento
-  }
-  return false;
+  estadoActual = controlRGB; // Cambiamos al estado de control RGB
 }
 
 
@@ -260,4 +305,89 @@ void serialEvent() {
       bufferTemporal += caracterEntrante; // Seguimos acumulando el texto
     }
   }
+}
+
+int calcular_duttyMonocromatico(float p_temp){
+  int dutty = 0;
+  dutty = 10.2 * p_temp - 255;
+  return dutty;
+}
+
+// Función auxiliar para mapear valores intermedios (regla de tres lineal)
+float mapear(float x, float in_min, float in_max, float out_min, float out_max) {
+    return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
+RGB calcularDutyCycleRGB(float p_temp) {
+    RGB led;
+
+    // Caso 1: Frío (Menor o igual a 28°C) -> Violeta fijo
+    if (p_temp <= 28.0) {
+        led.r = 180; led.g = 0; led.b = 255;
+    }
+    // Caso 2: De Violeta a Azul (28°C a 32.4°C)
+    else if (p_temp > 28.0 && p_temp <= 32.4) {
+        led.r = (int)mapear(p_temp, 28.0, 32.4, 180, 0);
+        led.g = 0;
+        led.b = 255;
+    }
+    // Caso 3: De Azul a Verde (32.4°C a 36.8°C)
+    else if (p_temp > 32.4 && p_temp <= 36.8) {
+        led.r = 0;
+        led.g = (int)mapear(p_temp, 32.4, 36.8, 0, 255);
+        led.b = (int)mapear(p_temp, 32.4, 36.8, 255, 0);
+    }
+    // Caso 4: De Verde a Amarillo (36.8°C a 41.2°C)
+    else if (p_temp > 36.8 && p_temp <= 41.2) {
+        led.r = (int)mapear(p_temp, 36.8, 41.2, 0, 255);
+        led.g = 255;
+        led.b = 0;
+    }
+    // Caso 5: De Amarillo a Naranja (41.2°C a 45.6°C)
+    else if (p_temp > 41.2 && p_temp <= 45.6) {
+        led.r = 255;
+        led.g = (int)mapear(p_temp, 41.2, 45.6, 255, 128);
+        led.b = 0;
+    }
+    // Caso 6: De Naranja a Rojo (45.6°C a 50.0°C)
+    else if (p_temp > 45.6 && p_temp < 50.0) {
+        led.r = 255;
+        led.g = (int)mapear(p_temp, 45.6, 50.0, 128, 0);
+        led.b = 0;
+    }
+    // Caso 7: Muy caliente (Mayor o igual a 50°C) -> Rojo fijo
+    else {
+        led.r = 255; led.g = 0; led.b = 0;
+    }
+
+    return led;
+}
+
+void configurarTimer(float frecuenciaHz) {
+    uint8_t tipo_timer = 0;
+    int canal_timer = 0;
+
+    // 1. Buscar un canal de temporizador AGT (Asynchronous General-Purpose Timer) disponible
+    if (!FspTimer::get_available_timer(tipo_timer, canal_timer)) {
+        Serial.println("Error: No hay temporizadores disponibles.");
+        return;
+    }
+
+    // 2. Configurar las propiedades del temporizador
+    // Usamos el modo PERIODIC y el temporizador AGT seleccionado
+    temporizador.begin(TIMER_MODE_PERIODIC, tipo_timer, canal_timer, frecuenciaHz, 50.0f, miFuncionInterrupcion, nullptr);
+
+    // 3. Habilitar la interrupción en el controlador de interrupciones (NVIC)
+    temporizador.setup_overflow_irq();
+
+    // 4. Abrir e iniciar el temporizador
+    temporizador.open();
+    temporizador.start();
+
+    Serial.print("Temporizador configurado en el canal: ");
+    Serial.println(canal_timer);
+}
+
+void miFuncionInterrupcion(timer_callback_args_t *args) {
+    estadoActual = enviarTemperatura; // Cambiamos al estado de enviar temperatura
 }
