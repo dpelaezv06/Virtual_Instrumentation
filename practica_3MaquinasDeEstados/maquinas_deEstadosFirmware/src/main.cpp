@@ -152,7 +152,6 @@ void maquinaEstados() {
         estadoActual = IDLE;
       }
 
-      estadoActual = IDLE;
       break;
 
     case controlRGB:
@@ -215,6 +214,7 @@ void maquinaEstados() {
           estadoActual = IDLE;
           break;
       }
+      estadoActual = IDLE;
       break;
     }
     break;
@@ -231,6 +231,12 @@ void maquinaEstados() {
       Serial.print("G");
       Serial.println(dutty.g);
       estadoActual = IDLE;
+      if (control == controlResistencia) {
+        estadoActual = controlRGB; // Volver al estado de control RGB si estamos en control de resistencia
+      }
+      else {
+        estadoActual = IDLE; // Volver al estado de espera si estamos en control de toque
+      }
       break;
     
     case encenderResistencia:
