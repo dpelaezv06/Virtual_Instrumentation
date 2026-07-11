@@ -10,7 +10,7 @@ const int PIN_RESISTENCIA = 8; // Pin digital conectado al transistor/relé de l
 const int PIN_RED   = 11; 
 const int PIN_GREEN = 10;
 const int PIN_BLUE  = 9;
-
+volatile bool flagInterrupcion = false; // Bandera para indicar que se ha producido una interrupción
 
 
 void ISR_sensorToque();
@@ -23,6 +23,7 @@ int calcular_duttyMonocromatico(float p_temp);
 void maquinaEstados();
 void miFuncionInterrupcion(timer_callback_args_t *args);
 void configurarTimer(float frecuenciaHz);
+void serialEvent();
 
 float temp = 0.0; // Variable para almacenar la temperatura leída del LM35
 String mensajeRecibido = "";     // Aquí se guardará el texto final (sin el '_')
@@ -91,14 +92,13 @@ void setup() {
   pinMode(PIN_BLUE, OUTPUT);
   Serial.begin(115200);
   digitalWrite(PIN_RESISTENCIA, LOW);
-  configurarTimer(20.0f);
+  configurarTimer(50.0f);
 
 }
 
 void loop() {
+  serialEvent() ; // Procesar datos entrantes del puerto serie
   maquinaEstados();
-  
- 
 
 }
 
@@ -188,6 +188,7 @@ void maquinaEstados() {
       }
       estadoActual = IDLE;
       break;
+      
       case controlToque:
       switch (colorToque) {
         case azulToque:
@@ -249,6 +250,11 @@ void maquinaEstados() {
       estadoActual = IDLE;
       break;
     case IDLE:
+      if (flagInterrupcion) {
+        flagInterrupcion = false; // Limpiar la bandera
+        estadoActual = enviarTemperatura; // Cambiar al estado de enviar temperatura
+      }
+      break;
     default:
       // Estado de espera, no hacer nada
       break;
@@ -396,5 +402,6 @@ void configurarTimer(float frecuenciaHz) {
 }
 
 void miFuncionInterrupcion(timer_callback_args_t *args) {
-    estadoActual = enviarTemperatura; // Cambiamos al estado de enviar temperatura
+    flagInterrupcion = true; // Establecemos la bandera de interrupción
+   
 }
