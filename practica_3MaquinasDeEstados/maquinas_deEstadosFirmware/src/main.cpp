@@ -12,7 +12,6 @@ const int PIN_GREEN = 10;
 const int PIN_BLUE  = 9;
 volatile bool flagInterrupcion = false; // Bandera para indicar que se ha producido una interrupción
 
-
 void ISR_sensorToque();
 bool leerEstadoSensor();
 float leerTemperaturaLM35();
@@ -24,6 +23,8 @@ void maquinaEstados();
 void miFuncionInterrupcion(timer_callback_args_t *args);
 void configurarTimer(float frecuenciaHz);
 void serialEvent();
+int toggleLED(int pwmDutty);
+
 
 float temp = 0.0; // Variable para almacenar la temperatura leída del LM35
 String mensajeRecibido = "";     // Aquí se guardará el texto final (sin el '_')
@@ -192,27 +193,47 @@ void maquinaEstados() {
       case controlToque:
       switch (colorToque) {
         case azulToque:
-          controlarLedRGB(0, 0, 255);
+        controlarLedRGB(0, 0, 0);
+        dutty.b = toggleLED(dutty.b);
           estadoActual = IDLE;
           break;
+
+
         case rojoToque:
-          controlarLedRGB(255, 0, 0);
+        controlarLedRGB(0, 0, 0);
+          dutty.r = toggleLED(dutty.r);
           estadoActual = IDLE;
           break;
+
+
         case verdeToque:
-          controlarLedRGB(0, 255, 0);
+        controlarLedRGB(0, 0, 0);
+          dutty.g = toggleLED(dutty.g);
           estadoActual = IDLE;
           break;
+
+
         case blancoToque:
-          controlarLedRGB(255, 255, 255);
+          controlarLedRGB(0, 0, 0);
+          dutty.r = toggleLED(dutty.r);
+          dutty.g = toggleLED(dutty.g);
+          dutty.b = toggleLED(dutty.b);
           estadoActual = IDLE;
           break;
+
+
         case violetaToque:
-          controlarLedRGB(180, 0, 255);
+      
+        controlarLedRGB(0, 0, 0);
+          dutty.b = toggleLED(dutty.b);
+          dutty.r = toggleLED(dutty.r);
           estadoActual = IDLE;
           break;
         case amarilloToque:
-          controlarLedRGB(255, 255, 0);
+          controlarLedRGB(0, 0, 0);
+          dutty.r = toggleLED(dutty.r);
+          dutty.g = toggleLED(dutty.g);
+
           estadoActual = IDLE;
           break;
       }
@@ -405,3 +426,18 @@ void miFuncionInterrupcion(timer_callback_args_t *args) {
     flagInterrupcion = true; // Establecemos la bandera de interrupción
    
 }
+
+int toggleLED(int pwmDutty){
+  int newDutty = 0;
+  if (pwmDutty != 0){
+    newDutty = 0;
+  }else{
+    newDutty = 255;
+
+  }
+  return newDutty;
+
+
+}
+
+
