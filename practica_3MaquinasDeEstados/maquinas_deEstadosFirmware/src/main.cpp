@@ -114,7 +114,7 @@ void maquinaEstados() {
         control = controlToque;
       }
       else if (mensajeRecibido == "ON") {
-        estadoActual = enviarTemperatura;
+        estadoActual = encenderResistencia;
       }
       else if (mensajeRecibido == "OFF") {
         estadoActual = apagarResistencia;
@@ -193,22 +193,28 @@ void maquinaEstados() {
       case controlToque:
       switch (colorToque) {
         case azulToque:
-        controlarLedRGB(0, 0, 0);
+        dutty.r = 0;
+        dutty.g = 0;
         dutty.b = toggleLED(dutty.b);
+        controlarLedRGB(dutty.r, dutty.g, dutty.b);
           estadoActual = IDLE;
           break;
 
 
         case rojoToque:
-        controlarLedRGB(0, 0, 0);
+          dutty.b = 0;
+          dutty.g = 0;
           dutty.r = toggleLED(dutty.r);
+          controlarLedRGB(dutty.r, dutty.g, dutty.b);
           estadoActual = IDLE;
           break;
 
 
         case verdeToque:
-        controlarLedRGB(0, 0, 0);
+          dutty.r = 0;
+          dutty.b = 0;
           dutty.g = toggleLED(dutty.g);
+          controlarLedRGB(dutty.r, dutty.g, dutty.b);
           estadoActual = IDLE;
           break;
 
@@ -316,6 +322,7 @@ void controlarLedRGB(int dutyRed, int dutyGreen, int dutyBlue) {
   dutyRed   = constrain(dutyRed, 0, 255);
   dutyGreen = constrain(dutyGreen, 0, 255);
   dutyBlue  = constrain(dutyBlue, 0, 255);
+  
 
   // Escribimos el duty cycle en cada pin para formar el color
   analogWrite(PIN_RED, dutyRed);
