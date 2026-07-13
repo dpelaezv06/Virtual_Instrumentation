@@ -24,6 +24,7 @@ void miFuncionInterrupcion(timer_callback_args_t *args);
 void configurarTimer(float frecuenciaHz);
 void serialEvent();
 int toggleLED(int pwmDutty);
+void funcionInterpretarMensaje ();
 
 
 float temp = 0.0; // Variable para almacenar la temperatura leída del LM35
@@ -106,54 +107,7 @@ void loop() {
 void maquinaEstados() {
   switch (estadoActual) {
     case interpretarComando:
-   ; // Leer hasta el final de línea
-      if (mensajeRecibido == "R") {
-        control = controlResistencia;
-      } 
-      else if (mensajeRecibido  == "T") {
-        control = controlToque;
-      }
-      else if (mensajeRecibido == "ON") {
-        estadoActual = encenderResistencia;
-      }
-      else if (mensajeRecibido == "OFF") {
-        estadoActual = apagarResistencia;
-      }
-      else if (mensajeRecibido == "escalaAzul") {
-        color = azul;
-      }
-      else if (mensajeRecibido == "escalaRojo") {
-        color = rojo;
-      }
-      else if (mensajeRecibido == "escalaVerde") {
-        color = verde;
-      }
-      else if (mensajeRecibido == "escalaPolicromatico") {
-        color = policromatico;
-      }
-      else if (mensajeRecibido == "colorAzul") {
-        colorToque = azulToque;
-      }
-      else if (mensajeRecibido == "colorRojo") {
-        colorToque= rojoToque;
-      }
-      else if (mensajeRecibido == "colorVerde") {
-        colorToque= verdeToque;
-      }
-      else if (mensajeRecibido == "colorBlanco") {
-        colorToque= blancoToque;
-      }
-      else if (mensajeRecibido == "colorVioleta") {
-        colorToque= violetaToque;
-      }
-      else if (mensajeRecibido == "colorAmarillo") {
-        colorToque = amarilloToque;
-      }
-      else {
-        // Comando no reconocido, volver a IDLE
-        estadoActual = IDLE;
-      }
-
+      funcionInterpretarMensaje ();
       break;
 
     case controlRGB:
@@ -163,18 +117,24 @@ void maquinaEstados() {
       switch (color) {
 
         case azul:
+        dutty.r = 0;
+        dutty.g = 0;
         dutty.b = calcular_duttyMonocromatico(temp);
-        controlarLedRGB(0, 0, dutty.b);
+        controlarLedRGB(dutty.r, dutty.g, dutty.b);
         estadoActual = IDLE; // Cambiar al estado de enviar temperatura
         break;
 
         case rojo:
+            dutty.b = 0;
+            dutty.g = 0;
             dutty.r = calcular_duttyMonocromatico(temp);
             controlarLedRGB(dutty.r, 0, 0);
             estadoActual = IDLE; // Cambiar al estado de enviar temperatura
           break;
 
         case verde:
+            dutty.r = 0;
+            dutty.b = 0;
             dutty.g = calcular_duttyMonocromatico(temp);
             controlarLedRGB(0, dutty.g, 0);
             estadoActual = IDLE; // Cambiar al estado de enviar temperatura
@@ -182,21 +142,29 @@ void maquinaEstados() {
 
 
         case policromatico:
-            calcularDutyCycleRGB(temp);
+            controlarLedRGB(0, 0, 0);
+            dutty.r = calcularDutyCycleRGB(temp).r;
+            dutty.g = calcularDutyCycleRGB(temp).g;
+            dutty.b = calcularDutyCycleRGB(temp).b;
+            controlarLedRGB(dutty.r, dutty.g, dutty.b);
             estadoActual = IDLE; // Cambiar al estado de enviar temperatura
  
           break;
+
+          default:
+            // Color no reconocido, volver a IDLE
+            estadoActual = IDLE;
+            break;
       }
-      estadoActual = IDLE;
       break;
       
       case controlToque:
       switch (colorToque) {
         case azulToque:
-        dutty.r = 0;
-        dutty.g = 0;
-        dutty.b = toggleLED(dutty.b);
-        controlarLedRGB(dutty.r, dutty.g, dutty.b);
+          dutty.r = 0;
+          dutty.g = 0;
+          dutty.b = toggleLED(dutty.b);
+          controlarLedRGB(dutty.r, dutty.g, dutty.b);
           estadoActual = IDLE;
           break;
 
@@ -220,33 +188,40 @@ void maquinaEstados() {
 
 
         case blancoToque:
-          controlarLedRGB(0, 0, 0);
           dutty.r = toggleLED(dutty.r);
-          dutty.g = toggleLED(dutty.g);
-          dutty.b = toggleLED(dutty.b);
+          dutty.g = dutty.r;
+          dutty.b = dutty.b;
+          controlarLedRGB(dutty.r, dutty.g, dutty.b);
           estadoActual = IDLE;
           break;
 
 
         case violetaToque:
-      
-        controlarLedRGB(0, 0, 0);
           dutty.b = toggleLED(dutty.b);
-          dutty.r = toggleLED(dutty.r);
+          dutty.r = dutty.b;
+          controlarLedRGB(dutty.r, 0, dutty.b);
           estadoActual = IDLE;
           break;
-        case amarilloToque:
-          controlarLedRGB(0, 0, 0);
-          dutty.r = toggleLED(dutty.r);
-          dutty.g = toggleLED(dutty.g);
 
+        case amarilloToque:
+          dutty.r = toggleLED(dutty.r);
+          dutty.g = dutty.r;
+          controlarLedRGB(dutty.r, dutty.g, 0);
+          estadoActual = IDLE;
+          break;
+
+        default:
+          // Color no reconocido, volver a IDLE
           estadoActual = IDLE;
           break;
       }
-      estadoActual = IDLE;
       break;
+      default:
+        // Control no reconocido, volver a IDLE
+        estadoActual = IDLE;
+        break;
     }
-    break;
+   
 
 
     case enviarTemperatura:
@@ -289,7 +264,10 @@ void maquinaEstados() {
 }
 // --- Función de Interrupción (ISR) ---
 void ISR_sensorToque() {
-  estadoActual = controlRGB; // Cambiamos al estado de control RGB
+  if (control == controlToque) {
+    estadoActual = controlRGB; // Cambiamos al estado de control RGB
+  }
+  
 }
 
 
@@ -298,7 +276,7 @@ float leerTemperaturaLM35() {
   
   // Convertimos el valor del ADC a voltaje (en Voltios) y luego a Celsius
   float voltaje = (lecturaADC * 5.0) / 1023.0;
-  float temperaturaCelsius = voltaje * 100.0;
+  float temperaturaCelsius = (voltaje * 100.0)-6;
   
   return temperaturaCelsius;
 }
@@ -447,4 +425,53 @@ int toggleLED(int pwmDutty){
 
 }
 
+void funcionInterpretarMensaje (){
+  // Leer hasta el final de línea
+      if (mensajeRecibido == "R") {
+        control = controlResistencia;
+      } 
+      else if (mensajeRecibido  == "T") {
+        control = controlToque;
+      }
+      else if (mensajeRecibido == "ON") {
+        estadoActual = encenderResistencia;
+      }
+      else if (mensajeRecibido == "OFF") {
+        estadoActual = apagarResistencia;
+      }
+      else if (mensajeRecibido == "escalaAzul") {
+        color = azul;
+      }
+      else if (mensajeRecibido == "escalaRojo") {
+        color = rojo;
+      }
+      else if (mensajeRecibido == "escalaVerde") {
+        color = verde;
+      }
+      else if (mensajeRecibido == "escalaPolicromatico") {
+        color = policromatico;
+      }
+      else if (mensajeRecibido == "colorAzul") {
+        colorToque = azulToque;
+      }
+      else if (mensajeRecibido == "colorRojo") {
+        colorToque= rojoToque;
+      }
+      else if (mensajeRecibido == "colorVerde") {
+        colorToque= verdeToque;
+      }
+      else if (mensajeRecibido == "colorBlanco") {
+        colorToque= blancoToque;
+      }
+      else if (mensajeRecibido == "colorVioleta") {
+        colorToque= violetaToque;
+      }
+      else if (mensajeRecibido == "colorAmarillo") {
+        colorToque = amarilloToque;
+      }
+      else {
+        // Comando no reconocido, volver a IDLE
+        estadoActual = IDLE;
+      }
 
+}
