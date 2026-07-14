@@ -27,7 +27,9 @@ class ArduinoApp:
         frame_temp = ttk.Frame(frame_superior)
         frame_temp.pack(side="left", expand=True)
         ttk.Label(frame_temp, text="Temperatura LM35:", font=("Arial", 10, "bold")).pack()
-        self.lbl_temperatura = ttk.Label(frame_temp, text="-- °C", font=("Arial", 26, "bold"), foreground="#d9534f")
+        
+        # Etiqueta adaptada para contener el formato ± u(x)
+        self.lbl_temperatura = ttk.Label(frame_temp, text="-- ± 0.35 °C", font=("Arial", 20, "bold"), foreground="#d9534f")
         self.lbl_temperatura.pack(pady=5)
 
         # Sub-cuadro para el cuadrado LED virtual
@@ -65,12 +67,14 @@ class ArduinoApp:
         frame_grid = ttk.Frame(self.tab_toque)
         frame_grid.pack()
 
-        # Botones de modo toque solicitados
+        # Botones actualizados para modo toque (6 botones en cuadrícula 3x2)
         colores = [
             ("Azul", "colorAzul"),
             ("Rojo", "colorRojo"),
             ("Verde", "colorVerde"),
-            ("Policromático", "escalaPolicromatico") # Añadido según tu petición
+            ("Violeta", "colorVioleta"),
+            ("Blanco", "colorBlanco"),
+            ("Amarillo", "colorAmarillo")
         ]
         
         for i, (texto, comando) in enumerate(colores):
@@ -119,16 +123,19 @@ class ArduinoApp:
             self.backend.enviar_comando("R") # Activar modo Resistencia/Temp en Arduino
 
     def actualizar_pantalla(self):
-        """Consulta los datos al backend y refresca la pantalla cada 100ms."""
-        temp, color = self.backend.obtener_datos()
+        """Consulta los datos al backend y refresca la pantalla cada 50ms exactos."""
+        temp, desv, color = self.backend.obtener_datos()
         
-        # Actualizar texto de temperatura
+        # Actualizar texto de temperatura con su respectiva incertidumbre
         if temp != "--":
-            self.lbl_temperatura.config(text=f"{temp} °C")
+            self.lbl_temperatura.config(text=f"{temp} ± {desv} °C")
+        else:
+            self.lbl_temperatura.config(text="-- ± 0.00 °C")
             
         # Actualizar el color del cuadrado del LED
         self.canvas_led.itemconfig(self.cuadrado_led, fill=color)
         
+        # PROGRAMADO A 50MS
         self.root.after(100, self.actualizar_pantalla)
 
     def on_closing(self):

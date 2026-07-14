@@ -12,6 +12,10 @@ const int PIN_GREEN = 10;
 const int PIN_BLUE  = 9;
 volatile bool flagInterrupcion = false; // Bandera para indicar que se ha producido una interrupción
 
+//Variables para evitar el debounce
+volatile unsigned long ultimoTiempoInterrupcion = 0;
+const unsigned long TIEMPO_DEBOUNCE = 250; // Tiempo en milisegundos para ignorar ráfagas
+
 void ISR_sensorToque();
 bool leerEstadoSensor();
 float leerTemperaturaLM35();
@@ -94,7 +98,7 @@ void setup() {
   pinMode(PIN_BLUE, OUTPUT);
   Serial.begin(115200);
   digitalWrite(PIN_RESISTENCIA, LOW);
-  configurarTimer(50.0f);
+  configurarTimer(10.0f);
 
 }
 
@@ -190,7 +194,7 @@ void maquinaEstados() {
         case blancoToque:
           dutty.r = toggleLED(dutty.r);
           dutty.g = dutty.r;
-          dutty.b = dutty.b;
+          dutty.b = dutty.r;
           controlarLedRGB(dutty.r, dutty.g, dutty.b);
           estadoActual = IDLE;
           break;
@@ -264,8 +268,13 @@ void maquinaEstados() {
 }
 // --- Función de Interrupción (ISR) ---
 void ISR_sensorToque() {
-  if (control == controlToque) {
-    estadoActual = controlRGB; // Cambiamos al estado de control RGB
+  unsigned long tiempoActual = millis();
+  // Solo si han pasado más de 250ms desde el último toque válido
+  if (tiempoActual - ultimoTiempoInterrupcion > TIEMPO_DEBOUNCE) {
+    if (control == controlToque) {
+      estadoActual = controlRGB; // Cambiamos al estado de control RGB
+    }
+    ultimoTiempoInterrupcion = tiempoActual; // Actualizar el registro de tiempo
   }
   
 }
@@ -408,7 +417,7 @@ void configurarTimer(float frecuenciaHz) {
 }
 
 void miFuncionInterrupcion(timer_callback_args_t *args) {
-    flagInterrupcion = true; // Establecemos la bandera de interrupción
+    estadoActual = enviarTemperatura; // Cambiamos al estado de enviar temperatura
    
 }
 
