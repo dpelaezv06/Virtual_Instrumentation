@@ -121,5 +121,23 @@ void funcion_enviarTemperatura() {
 
 
 void funcion_enviarNivelAgua (){
+  float lecturaADC = analogRead(pin_sensorNivelagua); // Leer el valor del sensor de nivel de agua
+
+  // Convertir la lectura ADC a voltaje (0-5V)
+  float voltaje = lecturaADC *  (5/ 1023.0); 
+  if (voltaje <= 2.9) {
+    nivel_agua = 5*voltaje;
+  }
+  else if (voltaje > 2.9 && voltaje <= 3.1 ){
+    nivel_agua = 7*voltaje;
+  }
+  else if (voltaje > 3.1 && voltaje<= 3.2){
+    nivel_agua = 10*voltaje;
+  }
+  else{
+    nivel_agua = 14.2*voltaje;
+  }
+  Serial.print("Nivel de agua: ");
+  Serial.println(nivel_agua); // Enviar el valor por el puerto serie
 
 }
