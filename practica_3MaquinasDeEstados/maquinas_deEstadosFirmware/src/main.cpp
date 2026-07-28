@@ -416,7 +416,7 @@ void configurarTimer(float frecuenciaHz) {
     Serial.println(canal_timer);
 }
 
-void miFuncionInterrupcion(timer_callback_args_t *args) {
+void miFuncionInterrupcion (timer_callback_args_t *args) {
     estadoActual = enviarTemperatura; // Cambiamos al estado de enviar temperatura
    
 }

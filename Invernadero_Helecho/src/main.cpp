@@ -7,6 +7,12 @@
 #define DHTPIN2 A2 
 #define DHTTYPE DHT11 // Tipo de sensor
 
+//Definimos el pin para el control de humedad
+const int PIN_Humidificador = 2;
+//Pines para el control de la bombilla
+const int zero_cross = 3;
+const int disparador = 4;
+
 DHT dht1(DHTPIN1, DHTTYPE);
 DHT dht2(DHTPIN2, DHTTYPE);
 
@@ -25,6 +31,11 @@ float humedad2 = 0;
 //Variable para almacenar el nivel del agua
 float nivel_agua = 0;
 
+//Variables para usar el serial de momento
+String mensajeRecibido = "";     // Aquí se guardará el texto final (sin el '_')
+String bufferTemporal = "";      // Va acumulando los caracteres que van llegando
+
+unsigned long tiempoAnterior = 0;
 //Posibles estados que puede tener la maquina de estados
 typedef enum {
   IDLE,
@@ -39,17 +50,24 @@ void funcion_enviarNivelAgua();
 void configurarTimer(float frecuenciaHz);
 void funcionInterrupcion(timer_callback_args_t *args);
 
+void funcionInterpretarMensaje ();
+void serialEvent();
+void funcionPara_disparar ();
+
 void maquinaDeEstados();
 
 void setup() {
     Serial.begin(115200);
     dht1.begin();
     dht2.begin();
-    configurarTimer(0.5f); // Configuramos el temporizador para que interrumpa cada 10 Hz
+    configurarTimer(0.5f); // Configuramos el temporizador para que interrumpa cada 2 s
+    pinMode(PIN_Humidificador, OUTPUT);
+    digitalWrite(PIN_Humidificador,LOW);
  
 }
 
 void loop() {
+  serialEvent();
   maquinaDeEstados();
 }
 
@@ -139,5 +157,45 @@ void funcion_enviarNivelAgua (){
   }
   Serial.print("Nivel de agua: ");
   Serial.println(nivel_agua); // Enviar el valor por el puerto serie
+
+}
+
+void serialEvent() {
+  // Mientras haya bytes en el búfer de hardware, los procesamos de inmediato
+  while (Serial.available()) {
+    char caracterEntrante = (char)Serial.read();
+    
+    // Si encontramos el carácter indicador '_'
+    if (caracterEntrante == '_') {
+      mensajeRecibido = bufferTemporal; // Guardamos TODO el texto acumulado HASTA AHORA
+      bufferTemporal = "";              // Limpiamos el buffer para el siguiente mensaje
+      funcionInterpretarMensaje(); // Cambiamos al estado de interpretación de comando
+    } 
+    // Si no es el '_', y tampoco son caracteres basura de control (como el salto de línea)
+    else if (caracterEntrante != '\n' && caracterEntrante != '\r') {
+      bufferTemporal += caracterEntrante; // Seguimos acumulando el texto
+    }
+  }
+}
+
+void funcionInterpretarMensaje (){
+  // Leer hasta el final de línea
+      if (mensajeRecibido == "F") {
+        digitalWrite(PIN_Humidificador, HIGH);
+        Serial.println("Led encendido");
+        delay (5000);
+        digitalWrite(PIN_Humidificador, LOW);
+        delay (300);
+        Serial.println ("Led apagado");
+      } 
+      else if (mensajeRecibido  == "T") {
+      }
+      else {
+        // Comando no reconocido, volver a IDLE
+        estadoActual = IDLE;
+      }
+}
+
+void funcionPara_disparar (){
 
 }
