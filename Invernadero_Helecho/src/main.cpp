@@ -19,8 +19,9 @@ DHT dht2(DHTPIN2, DHTTYPE);
 //Pines del invernadero
 const int pin_sensorNivelagua = A0; // Pin analógico para el sensor de nivel de agua
 
-// Instancia global del temporizador
-FspTimer temporizador;
+// Instancia global del temporizador 1
+FspTimer temporizador1;
+FspTimer temporizador2;
 
 //Variables para guardar las temperaturas y humedades
 float temperatura1 = 0;
@@ -35,6 +36,9 @@ float nivel_agua = 0;
 String mensajeRecibido = "";     // Aquí se guardará el texto final (sin el '_')
 String bufferTemporal = "";      // Va acumulando los caracteres que van llegando
 
+//Variable para gurdar la frecuencia de disparo
+float frecuencia_disparo = 200.0f; // Frecuencia de disparo en Hz
+
 unsigned long tiempoAnterior = 0;
 //Posibles estados que puede tener la maquina de estados
 typedef enum {
@@ -48,11 +52,14 @@ Estado estadoActual = IDLE;
 void funcion_enviarTemperatura();
 void funcion_enviarNivelAgua();
 void configurarTimer(float frecuenciaHz);
+void configurarTimer2(float frecuenciaHz);
 void funcionInterrupcion(timer_callback_args_t *args);
 
 void funcionInterpretarMensaje ();
 void serialEvent();
-void funcionPara_disparar ();
+void funcionPara_disparar (timer_callback_args_t *args);
+void funcionPara_iniciarTimer ();
+void toggle();
 
 void maquinaDeEstados();
 
@@ -63,6 +70,8 @@ void setup() {
     configurarTimer(0.5f); // Configuramos el temporizador para que interrumpa cada 2 s
     pinMode(PIN_Humidificador, OUTPUT);
     digitalWrite(PIN_Humidificador,LOW);
+    configurarTimer2(frecuencia_disparo); // Configuramos el temporizador para que interrumpa cada 2 s  
+    attachInterrupt(digitalPinToInterrupt(zero_cross), funcionPara_iniciarTimer, RISING); // Configuramos la interrupción para el cruce por cero
  
 }
 
@@ -98,14 +107,14 @@ void configurarTimer(float frecuenciaHz) {
 
     // 2. Configurar las propiedades del temporizador
     // Usamos el modo PERIODIC y el temporizador AGT seleccionado
-    temporizador.begin(TIMER_MODE_PERIODIC, tipo_timer, canal_timer, frecuenciaHz, 50.0f, funcionInterrupcion, nullptr);
+    temporizador1.begin(TIMER_MODE_PERIODIC, tipo_timer, canal_timer, frecuenciaHz, 50.0f, funcionInterrupcion, nullptr);
 
     // 3. Habilitar la interrupción en el controlador de interrupciones (NVIC)
-    temporizador.setup_overflow_irq();
+    temporizador1.setup_overflow_irq();
 
     // 4. Abrir e iniciar el temporizador
-    temporizador.open();
-    temporizador.start();
+    temporizador1.open();
+    temporizador1.start();
 
     Serial.print("Temporizador configurado en el canal: ");
     Serial.println(canal_timer);
@@ -195,7 +204,51 @@ void funcionInterpretarMensaje (){
         estadoActual = IDLE;
       }
 }
+void configurarTimer2(float frecuenciaHz){
+      uint8_t tipo_timer = 0;
+    int canal_timer = 1;
 
-void funcionPara_disparar (){
+    // 1. Buscar un canal de temporizador AGT (Asynchronous General-Purpose Timer) disponible
+    if (!FspTimer::get_available_timer(tipo_timer, canal_timer)) {
+        Serial.println("Error: No hay temporizadores disponibles.");
+        return;
+    }
+
+    // 2. Configurar las propiedades del temporizador
+    // Usamos el modo PERIODIC y el temporizador AGT seleccionado
+    temporizador2.begin(TIMER_MODE_PERIODIC, tipo_timer, canal_timer, frecuenciaHz, 50.0f, funcionPara_disparar, nullptr);
+
+
+
+
+    // 3. Habilitar la interrupción en el controlador de interrupciones (NVIC)
+    temporizador2.setup_overflow_irq();
+
+    // 4. Abrir e iniciar el temporizador
+    temporizador2.open();
+
+
+
+}
+void funcionPara_iniciarTimer (){
+    temporizador2.start();
+
+}
+
+void funcionPara_disparar (timer_callback_args_t *args){
+  temporizador2.stop();
+  toggle();
+  Serial.println("Disparo realizado");
+}
+
+void toggle(){
+  int lectura = digitalRead(disparador);
+  if (lectura != 0){
+    digitalWrite(disparador, LOW);
+  }
+  else{
+    digitalWrite(disparador, HIGH);
+
+  }
 
 }
