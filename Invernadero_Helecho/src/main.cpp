@@ -74,7 +74,7 @@ void setup() {
     pinMode(PIN_Humidificador, OUTPUT);
     digitalWrite(PIN_Humidificador,LOW);
     attachInterrupt(digitalPinToInterrupt(zero_cross), funcionPara_disparar, RISING); // Configuramos la interrupción para el cruce por cero
-    
+    pinMode(disparador,OUTPUT);
 
 }
 
@@ -217,7 +217,11 @@ void funcionInterpretarMensaje (){
 }
 
 void funcionPara_disparar (){
-    disparar = true;
+    //disparar = true;
+    digitalWrite(disparador,LOW);
+    delay(6);
+    digitalWrite(disparador,HIGH);
+
 
 }
 
