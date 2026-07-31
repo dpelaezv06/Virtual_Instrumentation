@@ -14,6 +14,9 @@ const int PIN_Humidificador = 2;
 const int zero_cross = 3;
 const int disparador = 4;
 
+//Pin para el ventilador
+const int ventilador = 8;
+
 
 DHT dht1(DHTPIN1, DHTTYPE);
 DHT dht2(DHTPIN2, DHTTYPE);
@@ -53,6 +56,20 @@ typedef enum {
 
 Estado estadoActual = IDLE;
 
+//Variables para el control PID del piezoeléctrico
+// Período del PWM (10 segundos)
+const unsigned long PWM_PERIOD = 500;
+
+// Duty cycle (0 - 100 %)
+volatile float duty = 40.0;
+volatile unsigned long previousMillis = 0;
+volatile unsigned long currentMillis = 0;
+
+// Tiempo dentro del período
+volatile unsigned long timeInPeriod = 0;
+// Tiempo que debe permanecer encendido
+volatile unsigned long onTime = 0;
+
 //Funciones para el manejo de la maquina de estados
 void funcion_enviarTemperatura();
 void funcion_enviarNivelAgua();
@@ -75,6 +92,7 @@ void setup() {
     digitalWrite(PIN_Humidificador,LOW);
     attachInterrupt(digitalPinToInterrupt(zero_cross), funcionPara_disparar, RISING); // Configuramos la interrupción para el cruce por cero
     pinMode(disparador,OUTPUT);
+    digitalWrite(ventilador,LOW);
 
 }
 
@@ -82,13 +100,24 @@ void loop() {
   serialEvent();
   maquinaDeEstados();
 
-  if(disparar){
-    disparar=false;
-    digitalWrite(disparador,LOW);
-    delay(6);
-    digitalWrite(disparador,HIGH);
- 
-}
+  //PWM del humidificador
+    currentMillis = millis();
+
+    // Tiempo dentro del período
+    timeInPeriod = currentMillis % PWM_PERIOD;
+
+    // Tiempo que debe permanecer encendido
+    onTime = PWM_PERIOD * duty / 100.0;
+
+    if (timeInPeriod < onTime)
+    {
+        digitalWrite(PIN_Humidificador, HIGH);
+    }
+    else
+    {
+        digitalWrite(PIN_Humidificador, LOW);
+    }
+
 }
 
 void maquinaDeEstados() {
