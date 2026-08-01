@@ -14,9 +14,6 @@ const int PIN_Humidificador = 2;
 const int zero_cross = 3;
 const int disparador = 4;
 
-//Pin para el ventilador
-const int ventilador = 8;
-
 
 DHT dht1(DHTPIN1, DHTTYPE);
 DHT dht2(DHTPIN2, DHTTYPE);
@@ -58,42 +55,6 @@ typedef enum {
 
 Estado estadoActual = IDLE;
 
-typedef enum {
-  automatico,
-  manual,
-} Modo;
-Modo modoControl = automatico;
-
-typedef enum
-{
-    INICIAL_OFF,
-    TRANSICION_OFF_ON,
-    ON,
-    TRANSICION_ON_OFF
-} Lugar;
-
-Lugar lugar = INICIAL_OFF;
-
-//Variables para el control PID del piezoeléctrico
-const short int PIN_HUMIDIFICADOR = 2;
-
-const unsigned long PERIODO_TIMER = 250;
-const unsigned int PERIODO_PWM = 5000;
-
-volatile int contador_interrupciones = 0;
-
-unsigned long tiempo_ultimo_cambio = 0;
-
-FspTimer temporizador1;
-volatile int contador = 0;
-
-
-bool estadoPWM = true;              // true = ejecutando PWM
-bool estadoSalida = LOW;            // estado actual del pin
-bool estadoAnterior = LOW;          // para detectar flancos
-
-unsigned long inicioPWM = 0;
-
 //Funciones para el manejo de la maquina de estados
 void funcion_enviarTemperatura();
 void funcion_enviarNivelAgua();
@@ -120,19 +81,20 @@ void setup() {
     digitalWrite(PIN_Humidificador,LOW);
     //attachInterrupt(digitalPinToInterrupt(zero_cross), funcionPara_disparar, RISING); // Configuramos la interrupción para el cruce por cero
     pinMode(disparador,OUTPUT);
-    digitalWrite(ventilador,LOW);
-    inicializarHumidificador();
-
-    inicioPWM = millis();
 
 }
 
 void loop() {
   serialEvent();
   maquinaDeEstados();
-  controlHumidificador(0.25);
 
-
+  if(disparar){
+    disparar=false;
+    digitalWrite(disparador,LOW);
+    delay(6);
+    digitalWrite(disparador,HIGH);
+ 
+}
 }
 
 void maquinaDeEstados() {
