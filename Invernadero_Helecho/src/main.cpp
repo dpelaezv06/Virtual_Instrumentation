@@ -25,7 +25,7 @@ DHT dht2(DHTPIN2, DHTTYPE);
 const int pin_sensorNivelagua = A0; // Pin analógico para el sensor de nivel de agua
 
 // Instancia global del temporizador 1
-FspTimer temporizador1;
+FspTimer temporizador;
 FspTimer temporizador2;
 
 //Variables para guardar las temperaturas y humedades
@@ -33,6 +33,8 @@ float temperatura1 = 0;
 float humedad1 = 0;
 float temperatura2 = 0;
 float humedad2 = 0;
+float temperaturaPromedio = 0;
+float humedadPromedio = 0;
 
 //Variable para almacenar el nivel del agua
 float nivel_agua = 0;
@@ -56,30 +58,57 @@ typedef enum {
 
 Estado estadoActual = IDLE;
 
+typedef enum {
+  automatico,
+  manual,
+} Modo;
+Modo modoControl = automatico;
+
+typedef enum
+{
+    INICIAL_OFF,
+    TRANSICION_OFF_ON,
+    ON,
+    TRANSICION_ON_OFF
+} Lugar;
+
+Lugar lugar = INICIAL_OFF;
+
 //Variables para el control PID del piezoeléctrico
-// Período del PWM (10 segundos)
-const unsigned long PWM_PERIOD = 500;
+const short int PIN_HUMIDIFICADOR = 2;
 
-// Duty cycle (0 - 100 %)
-volatile float duty = 40.0;
-volatile unsigned long previousMillis = 0;
-volatile unsigned long currentMillis = 0;
+const unsigned long PERIODO_TIMER = 250;
+const unsigned int PERIODO_PWM = 5000;
 
-// Tiempo dentro del período
-volatile unsigned long timeInPeriod = 0;
-// Tiempo que debe permanecer encendido
-volatile unsigned long onTime = 0;
+volatile int contador_interrupciones = 0;
+
+unsigned long tiempo_ultimo_cambio = 0;
+
+FspTimer temporizador1;
+volatile int contador = 0;
+
+
+bool estadoPWM = true;              // true = ejecutando PWM
+bool estadoSalida = LOW;            // estado actual del pin
+bool estadoAnterior = LOW;          // para detectar flancos
+
+unsigned long inicioPWM = 0;
 
 //Funciones para el manejo de la maquina de estados
 void funcion_enviarTemperatura();
 void funcion_enviarNivelAgua();
 void configurarTimer(float frecuenciaHz);
 void funcionInterrupcion(timer_callback_args_t *args);
+void funcionInterrupcion1(timer_callback_args_t *args);
 
 void funcionInterpretarMensaje ();
 void serialEvent();
 void funcionPara_disparar ();
 void toggle();
+void inicializarHumidificador();
+void configurarTimer1(float frecuenciaHz);
+
+void controlHumidificador(float duty);
 
 void maquinaDeEstados();
 
@@ -88,51 +117,49 @@ void setup() {
     dht1.begin();
     dht2.begin();
     configurarTimer(0.5f); // Configuramos el temporizador para que interrumpa cada 2 s
-    pinMode(PIN_Humidificador, OUTPUT);
     digitalWrite(PIN_Humidificador,LOW);
-    attachInterrupt(digitalPinToInterrupt(zero_cross), funcionPara_disparar, RISING); // Configuramos la interrupción para el cruce por cero
+    //attachInterrupt(digitalPinToInterrupt(zero_cross), funcionPara_disparar, RISING); // Configuramos la interrupción para el cruce por cero
     pinMode(disparador,OUTPUT);
     digitalWrite(ventilador,LOW);
+    inicializarHumidificador();
+
+    inicioPWM = millis();
 
 }
 
 void loop() {
   serialEvent();
   maquinaDeEstados();
+  controlHumidificador(0.25);
 
-  //PWM del humidificador
-    currentMillis = millis();
-
-    // Tiempo dentro del período
-    timeInPeriod = currentMillis % PWM_PERIOD;
-
-    // Tiempo que debe permanecer encendido
-    onTime = PWM_PERIOD * duty / 100.0;
-
-    if (timeInPeriod < onTime)
-    {
-        digitalWrite(PIN_Humidificador, HIGH);
-    }
-    else
-    {
-        digitalWrite(PIN_Humidificador, LOW);
-    }
 
 }
 
 void maquinaDeEstados() {
-  switch (estadoActual) {
-    case IDLE:
+  switch (modoControl) {
+    case automatico:
+      // En modo automático, ejecutamos la máquina de estados normal
+        switch (estadoActual) {
+          case IDLE:
+            break;
+
+          case enviarDatos:
+            funcion_enviarTemperatura();
+            funcion_enviarNivelAgua();
+            estadoActual = IDLE;
+            break;
+          }
       break;
 
-    case enviarDatos:
-      funcion_enviarTemperatura();
-      funcion_enviarNivelAgua();
-      estadoActual = IDLE;
-      break;
-    
+    case manual:
+      // En modo manual, no hacemos nada en la máquina de estados
+      break;;
 
+    default:
+      // Si por alguna razón el modo de control es inválido, también salimos
+      break;
   }
+
 }
 
 void configurarTimer(float frecuenciaHz) {
@@ -147,17 +174,31 @@ void configurarTimer(float frecuenciaHz) {
 
     // 2. Configurar las propiedades del temporizador
     // Usamos el modo PERIODIC y el temporizador AGT seleccionado
-    temporizador1.begin(TIMER_MODE_PERIODIC, tipo_timer, canal_timer, frecuenciaHz, 50.0f, funcionInterrupcion, nullptr);
+    temporizador.begin(TIMER_MODE_PERIODIC, tipo_timer, canal_timer, frecuenciaHz, 50.0f, funcionInterrupcion, nullptr);
 
     // 3. Habilitar la interrupción en el controlador de interrupciones (NVIC)
-    temporizador1.setup_overflow_irq();
+    temporizador.setup_overflow_irq();
 
     // 4. Abrir e iniciar el temporizador
-    temporizador1.open();
-    temporizador1.start();
+    temporizador.open();
+    temporizador.start();
 
     Serial.print("Temporizador configurado en el canal: ");
     Serial.println(canal_timer);
+}
+
+void configurarTimer1(float frecuenciaHz) {
+    uint8_t tipo_timer = 0;
+    int canal_timer = 1;
+
+    if (!FspTimer::get_available_timer(tipo_timer, canal_timer)) {
+        Serial.println("Error: No hay temporizadores disponibles.");
+        return;
+    }
+
+    temporizador1.begin(TIMER_MODE_PERIODIC, tipo_timer, canal_timer, frecuenciaHz, 50.0f, funcionInterrupcion1, nullptr);
+    temporizador1.setup_overflow_irq();
+    temporizador1.open();
 }
 
 void funcionInterrupcion(timer_callback_args_t *args) {
@@ -172,18 +213,16 @@ void funcion_enviarTemperatura() {
     temperatura2 = dht2.readTemperature(); // Leer la temperatura en Celsius
     humedad2 = dht2.readHumidity(); // Leer la humedad relativa
 
-    // Enviar los datos por el puerto serie
-    Serial.print("Temperatura 1: ");
-    Serial.print(temperatura1);
-    Serial.print(" °C, Humedad 1: ");
-    Serial.print(humedad1);
-    Serial.println(" %");
+    temperaturaPromedio = (temperatura1 + temperatura2) / 2;
+    humedadPromedio = (humedad1 + humedad2) / 2;
 
-    Serial.print("Temperatura 2: ");
-    Serial.print(temperatura2);
-    Serial.print(" °C, Humedad 2: ");
-    Serial.print(humedad2);
-    Serial.println(" %");
+
+    // Enviar los datos por el puerto serie
+    Serial.print("t_");
+    Serial.print(temperaturaPromedio);
+    Serial.print("h_");
+    Serial.print(humedadPromedio);
+
 }
 
 
@@ -204,8 +243,8 @@ void funcion_enviarNivelAgua (){
   else{
     nivel_agua = 14.2*voltaje;
   }
-  Serial.print("Nivel de agua: ");
-  Serial.println(nivel_agua); // Enviar el valor por el puerto serie
+  Serial.print("n_");
+  Serial.println(int(nivel_agua)); // Enviar el valor por el puerto serie
 
 }
 
@@ -229,15 +268,27 @@ void serialEvent() {
 
 void funcionInterpretarMensaje (){
   // Leer hasta el final de línea
-      if (mensajeRecibido == "F") {
-        digitalWrite(PIN_Humidificador, HIGH);
-        Serial.println("Led encendido");
-        delay (5000);
-        digitalWrite(PIN_Humidificador, LOW);
-        delay (300);
-        Serial.println ("Led apagado");
+      if (mensajeRecibido == "A") {
+        modoControl = automatico;
+
       } 
-      else if (mensajeRecibido  == "T") {
+      else if (mensajeRecibido  == "M") {
+        modoControl = manual;
+      }
+      else if(mensajeRecibido == "V1"){
+        digitalWrite(ventilador,HIGH);
+      }
+      else if(mensajeRecibido == "V0"){
+        digitalWrite(ventilador,LOW);
+      }
+      else if (mensajeRecibido == "B1"){
+         attachInterrupt(digitalPinToInterrupt(zero_cross), funcionPara_disparar, RISING);
+      }
+      else if (mensajeRecibido == "B0"){
+        //DEsactivamos la interrupción para el cruce por cero
+        detachInterrupt(digitalPinToInterrupt(zero_cross));
+
+      
       }
       else {
         // Comando no reconocido, volver a IDLE
@@ -250,8 +301,99 @@ void funcionPara_disparar (){
     digitalWrite(disparador,LOW);
     delay(6);
     digitalWrite(disparador,HIGH);
-
-
 }
 
+void controlHumidificador(float duty)
+{
+    unsigned long tiempo_apagado =
+        ((1.0 - duty) * PERIODO_PWM) - (2 * PERIODO_TIMER);
+
+    unsigned long tiempo_encendido =
+        (duty * PERIODO_PWM) - (4 * PERIODO_TIMER);
+
+    switch (lugar)
+    {
+
+    case INICIAL_OFF:
+
+        if (millis() - tiempo_ultimo_cambio >= tiempo_apagado)
+        {
+            lugar = TRANSICION_OFF_ON;
+
+            contador_interrupciones = 0;
+
+            temporizador1.start();
+        }
+
+        break;
+
+    case TRANSICION_OFF_ON:
+
+        if (contador_interrupciones >= 2)
+        {
+            temporizador1.stop();
+
+            temporizador1.reset();
+
+            digitalWrite(PIN_HUMIDIFICADOR, HIGH);
+
+            lugar = ON;
+
+            tiempo_ultimo_cambio = millis();
+        }
+
+        break;
+
+    case ON:
+
+        if (millis() - tiempo_ultimo_cambio >= tiempo_encendido)
+        {
+            lugar = TRANSICION_ON_OFF;
+
+            contador_interrupciones = 0;
+
+            temporizador1.start();
+        }
+
+        break;
+
+    case TRANSICION_ON_OFF:
+
+        if (contador_interrupciones >= 4)
+        {
+            temporizador1.stop();
+
+            temporizador1.reset();
+
+            digitalWrite(PIN_HUMIDIFICADOR, HIGH);
+
+            lugar = INICIAL_OFF;
+
+            tiempo_ultimo_cambio = millis();
+        }
+
+        break;
+    }
+}
+
+void inicializarHumidificador()
+{
+    pinMode(PIN_HUMIDIFICADOR, OUTPUT);
+    digitalWrite(PIN_HUMIDIFICADOR, HIGH);
+    configurarTimer(1.0f / (PERIODO_TIMER / 1000.0f));
+    delay(500);
+    tiempo_ultimo_cambio = millis();
+}
+
+void funcionInterrupcion1(timer_callback_args_t *args) {
+    // 3. CORRECCIÓN: Empezar asumiendo que el botón está libre (HIGH)
+    static bool estadoBoton = HIGH;
+    
+    // En la primera interrupción (250ms) pasará a LOW (Pulsa el botón)
+    // En la segunda interrupción (500ms) pasará a HIGH (Suelta el botón)
+    estadoBoton = !estadoBoton; 
+    digitalWrite(PIN_HUMIDIFICADOR, estadoBoton);
+    
+    contador_interrupciones++;
+}
 
