@@ -1,139 +1,117 @@
 #include <Arduino.h>
 #include "FspTimer.h"
 
-
 const short int PIN_HUMIDIFICADOR = 2;
 
-const unsigned long PERIODO_TIMER = 250; // Período del temporizador en milisegundos (250 ms)
-const unsigned int PERIODO_PWM = 5000;
-float duty = 0.5;
-int contador_interrupciones = 0;
+const unsigned long PERIODO_TIMER = 250; // 250 ms por cada "movimiento" del botón
+const unsigned int PERIODO_PWM = 5000;   // 5 segundos en total
 
-volatile unsigned long tiempo_actual = 0;
-volatile bool done =false;
+// 1. CORRECCIÓN: duty debe ser float para soportar decimales (0.5)
+float duty = 0.5; 
+
+// 2. CORRECCIÓN: Las variables modificadas en interrupciones deben ser volatile
+volatile int contador_interrupciones = 0;
+
+// Reemplazamos el % por el método seguro de intervalos de tiempo
+unsigned long tiempo_ultimo_cambio = 0;
+
 FspTimer temporizador1;
 
 void configurarTimer(float frecuenciaHz);
 void funcionInterrupcion(timer_callback_args_t *args);
 
-
-
-
 typedef enum {
   INICIAL_OFF,
   TRANSICION_OFF_ON,
   ON,
-  TRANSICION_ON_OFF,
-  OFF
+  TRANSICION_ON_OFF
 } Lugar;
 
 Lugar lugar = INICIAL_OFF;
 
 void setup() {
   pinMode(PIN_HUMIDIFICADOR, OUTPUT);
-  digitalWrite(PIN_HUMIDIFICADOR, HIGH);
-  configurarTimer(1.0f / (PERIODO_TIMER / 1000.0f)); // Configurar el temporizador para que interrumpa cada 250 ms  
+  // Asumimos que HIGH es botón SIN PULSAR y LOW es botón PULSADO
+  digitalWrite(PIN_HUMIDIFICADOR, HIGH); 
+  
+  configurarTimer(1.0f / (PERIODO_TIMER / 1000.0f)); 
   delay(500);
+  
+  tiempo_ultimo_cambio = millis(); // Inicializamos el contador de tiempo
 }
 
 void loop() {
+  // Calculamos el tiempo descontando lo que toma físicamente hacer los "clicks"
+  // 2 interrupciones = 500ms
+  unsigned long tiempo_apagado = ((1.0 - duty) * PERIODO_PWM) - (2 * PERIODO_TIMER);
+  // 4 interrupciones = 1000ms
+  unsigned long tiempo_encendido = (duty * PERIODO_PWM) - (4 * PERIODO_TIMER); 
 
-  tiempo_actual = millis();
-  tiempo_actual = tiempo_actual % PERIODO_PWM;
+  switch (lugar) {
+    case INICIAL_OFF:
+      // Espera el tiempo de reposo antes de encender
+      if (millis() - tiempo_ultimo_cambio >= tiempo_apagado) {
+        lugar = TRANSICION_OFF_ON;
+        contador_interrupciones = 0;
+        temporizador1.start();
+      }
+      break;
 
-  switch (lugar)
-  {
-  case INICIAL_OFF:
-  if (!done) {
-    digitalWrite(PIN_HUMIDIFICADOR, HIGH);
-    done = true;
+    case TRANSICION_OFF_ON:
+      // 2 interrupciones = Baja y sube 1 vez (1 click para encender)
+      if (contador_interrupciones >= 2) {
+        temporizador1.stop();
+        temporizador1.reset();
+        digitalWrite(PIN_HUMIDIFICADOR, HIGH); // Aseguramos soltar el botón
+        lugar = ON;
+        tiempo_ultimo_cambio = millis();
+      }
+      break;
+
+    case ON:
+      // Espera el tiempo encendido antes de apagar
+      if (millis() - tiempo_ultimo_cambio >= tiempo_encendido) {
+        lugar = TRANSICION_ON_OFF;
+        contador_interrupciones = 0;
+        temporizador1.start();
+      }
+      break;
+
+    case TRANSICION_ON_OFF:
+      // 4 interrupciones = Baja, sube, baja, sube (2 clicks para apagar)
+      if (contador_interrupciones >= 4) {
+        temporizador1.stop();
+        temporizador1.reset();
+        digitalWrite(PIN_HUMIDIFICADOR, HIGH); // Aseguramos soltar el botón
+        lugar = INICIAL_OFF;
+        tiempo_ultimo_cambio = millis();
+      }
+      break;
   }
-
-
-  if (!(tiempo_actual < ((1 - duty) * PERIODO_PWM) - PERIODO_TIMER)) {
-    lugar = TRANSICION_OFF_ON;
-    done = false;
-    temporizador1.start();
-  }
-
-    break;
-
-  case TRANSICION_OFF_ON:
-
-  if (contador_interrupciones == 2){
-    temporizador1.stop();
-    temporizador1.reset();
-    lugar = ON;
-    done = false;
-    contador_interrupciones = 0;
-  }
-
-    break;
-
-  case ON:
-
-  if (tiempo_actual >= (duty * PERIODO_PWM) - 3 * PERIODO_TIMER) {
-    lugar = TRANSICION_ON_OFF;
-    done = false;
-    temporizador1.start();
-  }
-
-  break;
-
-  case TRANSICION_ON_OFF:
-  if (contador_interrupciones == 4){
-    temporizador1.stop();
-    temporizador1.reset();
-    lugar = OFF;
-    done = false;
-    contador_interrupciones = 0;
-  }
-
-    break;
-
-  case OFF:
-  if (tiempo_actual < ((1 - duty) * PERIODO_PWM) - 2 * PERIODO_TIMER) {
-    lugar = TRANSICION_OFF_ON;  
-    done = false;
-    temporizador1.start();
-  }
-  break;
-    
-
-  
-  default:
-    break;
-  }
-
 }
-
-
 
 void configurarTimer(float frecuenciaHz) {
     uint8_t tipo_timer = 0;
     int canal_timer = 0;
 
-    // 1. Buscar un canal de temporizador AGT (Asynchronous General-Purpose Timer) disponible
     if (!FspTimer::get_available_timer(tipo_timer, canal_timer)) {
         Serial.println("Error: No hay temporizadores disponibles.");
         return;
     }
 
-    // 2. Configurar las propiedades del temporizador
-    // Usamos el modo PERIODIC y el temporizador AGT seleccionado
     temporizador1.begin(TIMER_MODE_PERIODIC, tipo_timer, canal_timer, frecuenciaHz, 50.0f, funcionInterrupcion, nullptr);
-
-    // 3. Habilitar la interrupción en el controlador de interrupciones (NVIC)
     temporizador1.setup_overflow_irq();
-
-    // 4. Abrir el temporizador
     temporizador1.open();
-
 }
 
 void funcionInterrupcion(timer_callback_args_t *args) {
-    static bool estadoHumidificador = false;
+    // 3. CORRECCIÓN: Empezar asumiendo que el botón está libre (HIGH)
+    static bool estadoBoton = HIGH;
+    
+    // En la primera interrupción (250ms) pasará a LOW (Pulsa el botón)
+    // En la segunda interrupción (500ms) pasará a HIGH (Suelta el botón)
+    estadoBoton = !estadoBoton; 
+    digitalWrite(PIN_HUMIDIFICADOR, estadoBoton);
+    
     contador_interrupciones++;
-    estadoHumidificador = !estadoHumidificador;
-    digitalWrite(PIN_HUMIDIFICADOR, estadoHumidificador ? HIGH : LOW);
 }
