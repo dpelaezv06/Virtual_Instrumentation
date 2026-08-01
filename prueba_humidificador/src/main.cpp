@@ -6,7 +6,7 @@ const short int PIN_HUMIDIFICADOR = 2;
 
 const unsigned long PERIODO_TIMER = 250; // Período del temporizador en milisegundos (250 ms)
 const unsigned int PERIODO_PWM = 5000;
-int duty = 0.5;
+float duty = 0.5;
 int contador_interrupciones = 0;
 
 volatile unsigned long tiempo_actual = 0;
