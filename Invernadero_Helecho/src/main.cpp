@@ -9,7 +9,7 @@
 #define DHTTYPE DHT11 // Tipo de sensor
 
 //Definimos el pin para el control de humedad
-const int PIN_Humidificador = 2;
+const int PIN_Humidificador = 5;
 //Pines para el control de la bombilla
 const int zero_cross = 3;
 const int disparador = 4;
@@ -46,11 +46,25 @@ String bufferTemporal = "";      // Va acumulando los caracteres que van llegand
 //Variable para gurdar la frecuencia de disparo
 float frecuencia_disparo = 120*8; // Frecuencia de disparo en Hz
 
-unsigned long tiempoAnterior = 0;
+//Variables para el control PID del piezoeléctrico
+
+// Duty cycle (0 - 100 %)
+volatile float duty = 40.0;
+int setpoint = 75; // Valor de referencia para la humedad relativa
+
 //Posibles estados que puede tener la maquina de estados
 typedef enum {
   IDLE,
   enviarDatos,
+  medirTemperatura,
+  tempAlta,
+  medirRH_Talta,
+  RHbaja_Talta,
+  RHalta_Talta,
+  medirRH_Tbaja,
+  RHbaja_Tbaja,
+  RHalta_Tbaja,
+  RHmedia_Tbaja,
 } Estado;
 
 Estado estadoActual = IDLE;
@@ -78,6 +92,9 @@ void configurarTimer1(float frecuenciaHz);
 
 void controlHumidificador(float duty);
 
+void calcularDutyCycle();
+void controlHumidificador();
+
 void maquinaDeEstados();
 
 void setup() {
@@ -85,15 +102,20 @@ void setup() {
     dht1.begin();
     dht2.begin();
     configurarTimer(0.5f); // Configuramos el temporizador para que interrumpa cada 2 s
+    pinMode(PIN_Humidificador, OUTPUT);
     digitalWrite(PIN_Humidificador,LOW);
+    pinMode(zero_cross, INPUT); // Configuramos el pin del cruce por cero como entrada
     //attachInterrupt(digitalPinToInterrupt(zero_cross), funcionPara_disparar, RISING); // Configuramos la interrupción para el cruce por cero
     pinMode(disparador,OUTPUT);
+    digitalWrite(ventilador,HIGH);
+    digitalWrite(disparador,LOW);
 
 }
 
 void loop() {
   serialEvent();
   maquinaDeEstados();
+
 
 }
 
@@ -108,6 +130,102 @@ void maquinaDeEstados() {
           case enviarDatos:
             funcion_enviarTemperatura();
             funcion_enviarNivelAgua();
+            //Condicional para generar el estado de alarma
+            if (nivel_agua < 7){
+              Serial.println("A_");
+            }
+
+            estadoActual = IDLE;
+            break;
+
+          case medirTemperatura:
+              temperatura1 = dht1.readTemperature(); // Leer la temperatura en Celsius
+              temperatura2 = dht2.readTemperature(); // Leer la temperatura en Celsius
+              temperaturaPromedio = (temperatura1 + temperatura2) / 2;
+
+              if (temperaturaPromedio > 40){
+                estadoActual = tempAlta;
+              }
+              else{
+                estadoActual = medirRH_Tbaja;
+              }
+              break;
+
+          case tempAlta:
+              // Si la temperatura es alta, encendemos el ventilador
+              detachInterrupt(digitalPinToInterrupt(zero_cross)); // Deshabilitamos la interrupción del cruce por cero
+              digitalWrite(disparador,LOW);
+              digitalWrite(ventilador, LOW); // Encender el ventilador
+              estadoActual = medirRH_Talta;
+              break;
+
+          
+          case medirRH_Talta:
+              humedad1 = dht1.readHumidity(); // Leer la humedad relativa
+              humedad2 = dht2.readHumidity(); // Leer la humedad relativa
+              humedadPromedio = (humedad1 + humedad2) / 2;
+
+              if (humedadPromedio < 70){
+                estadoActual = RHbaja_Talta;
+              }
+              else{
+                estadoActual = RHalta_Talta;
+              }
+              break;
+
+          case RHbaja_Talta:
+              calcularDutyCycle(); // Calculamos el duty cycle para el humidificador
+              controlHumidificador(); // Controlamos el humidificador con el duty cycle calculado
+              estadoActual = medirTemperatura; // Volvemos a medir la humedad
+              break;
+
+          case RHalta_Talta:
+              digitalWrite(PIN_Humidificador,LOW); // Apagamos el humidificador
+              estadoActual = medirTemperatura; // Volvemos a medir la humedad
+              break;
+
+          case medirRH_Tbaja:
+              humedad1 = dht1.readHumidity(); // Leer la humedad relativa
+              humedad2 = dht2.readHumidity(); // Leer la humedad relativa
+              humedadPromedio = (humedad1 + humedad2) / 2;
+
+              if (humedadPromedio < 70){
+                estadoActual = RHbaja_Tbaja;
+              }
+              else if (humedadPromedio >= 70 && humedadPromedio <= 80){
+                estadoActual = RHmedia_Tbaja;
+              }
+              else{
+                estadoActual = RHalta_Tbaja;
+              }
+              break;
+          
+          case RHbaja_Tbaja:
+              calcularDutyCycle(); // Calculamos el duty cycle para el humidificador
+              controlHumidificador(); // Controlamos el humidificador con el duty cycle calculado
+              digitalWrite(disparador,LOW);
+              detachInterrupt(digitalPinToInterrupt(zero_cross)); // Deshabilitamos la interrupción del cruce por cero
+              digitalWrite(ventilador, HIGH); // Encender el ventilador
+              estadoActual = medirTemperatura; // Volvemos a medir la humedad
+              break;
+
+          case RHmedia_Tbaja:
+              digitalWrite(disparador,LOW);
+              detachInterrupt(digitalPinToInterrupt(zero_cross)); // Deshabilitamos la interrupción del cruce por cero
+              digitalWrite(ventilador, LOW); // Encender el ventilador
+              digitalWrite(PIN_Humidificador,LOW); // Apagamos el humidificador
+              estadoActual = medirTemperatura; // Volvemos a medir la humedad
+              break;
+
+          case RHalta_Tbaja:
+              attachInterrupt(digitalPinToInterrupt(zero_cross), funcionPara_disparar, RISING); // Habilitamos la interrupción del cruce por cero
+              digitalWrite(ventilador, HIGH); // Apagamos el ventilador
+              digitalWrite(PIN_Humidificador,LOW); // Apagamos el humidificador
+              estadoActual = medirTemperatura; // Volvemos a medir la humedad
+              break;
+
+          default:
+            // Si por alguna razón el estado es inválido, volvemos a IDLE
             estadoActual = IDLE;
             break;
           }
@@ -156,16 +274,6 @@ void funcionInterrupcion(timer_callback_args_t *args) {
 }
 
 void funcion_enviarTemperatura() {
-    temperatura1 = dht1.readTemperature(); // Leer la temperatura en Celsius
-    humedad1 = dht1.readHumidity(); // Leer la humedad relativa
-
-    temperatura2 = dht2.readTemperature(); // Leer la temperatura en Celsius
-    humedad2 = dht2.readHumidity(); // Leer la humedad relativa
-
-    temperaturaPromedio = (temperatura1 + temperatura2) / 2;
-    humedadPromedio = (humedad1 + humedad2) / 2;
-
-
     // Enviar los datos por el puerto serie
     Serial.print("t_");
     Serial.print(temperaturaPromedio);
@@ -194,6 +302,7 @@ void funcion_enviarNivelAgua (){
   }
   Serial.print("n_");
   Serial.println(int(nivel_agua)); // Enviar el valor por el puerto serie
+
 
 }
 
@@ -225,20 +334,28 @@ void funcionInterpretarMensaje (){
         modoControl = manual;
       }
       else if(mensajeRecibido == "V1"){
-        digitalWrite(ventilador,HIGH);
+        if (modoControl == manual) {
+          digitalWrite(ventilador,LOW);
+        }
       }
+ 
       else if(mensajeRecibido == "V0"){
-        digitalWrite(ventilador,LOW);
+        if (modoControl == manual) {
+          digitalWrite(ventilador,HIGH);
+        }
       }
       else if (mensajeRecibido == "B1"){
+        if (modoControl == manual) {
          attachInterrupt(digitalPinToInterrupt(zero_cross), funcionPara_disparar, RISING);
+        }
       }
       else if (mensajeRecibido == "B0"){
-        //DEsactivamos la interrupción para el cruce por cero
-        detachInterrupt(digitalPinToInterrupt(zero_cross));
-
-      
+        if (modoControl == manual) {
+          detachInterrupt(digitalPinToInterrupt(zero_cross));
+          digitalWrite(disparador,LOW);
+        }
       }
+      
       else {
         // Comando no reconocido, volver a IDLE
         estadoActual = IDLE;
@@ -250,6 +367,41 @@ void funcionPara_disparar (){
     digitalWrite(disparador,LOW);
     delay(6);
     digitalWrite(disparador,HIGH);
+}
+
+//Funcion para control del humidificador mediante PID
+void controlHumidificador() {
+    // Asegurarse de que el duty cycle esté entre 0 y 100
+    if (duty < 0) duty = 0;
+    if (duty > 100) duty = 100;
+    analogWrite(PIN_Humidificador, (duty / 100.0) * 255); // Convertir el duty cycle a un valor entre 0 y 255
+}
+
+void calcularDutyCycle() {
+    // Constantes del PID
+    const float Kp = 1.0; // Ganancia proporcional
+    const float Ki = 0.1; // Ganancia integral
+    const float Kd = 0.05; // Ganancia derivativa
+
+    static float errorAnterior = 0;
+    static float integral = 0;
+
+    // Calcular el error
+    float error = setpoint - humedadPromedio;
+
+    // Calcular la integral y la derivada
+    integral += error;
+    float derivada = error - errorAnterior;
+
+    // Calcular el output del PID
+    duty = Kp * error + Ki * integral + Kd * derivada;
+
+    // Guardar el error actual para la próxima iteración
+    errorAnterior = error;
+
+    // Asegurarse de que el duty cycle esté entre 0 y 100
+    if (duty < 0) duty = 0;
+    if (duty > 100) duty = 100;
 }
 
 
