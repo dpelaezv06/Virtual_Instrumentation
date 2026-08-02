@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <DHT.h>
 #include "FspTimer.h"
+#include <WiFiS3.h>
 
 
 //Definimos el pin y el tipo de sensor
@@ -50,7 +51,7 @@ float frecuencia_disparo = 120*8; // Frecuencia de disparo en Hz
 
 // Duty cycle (0 - 100 %)
 static unsigned long inicioPeriodo = 0;
-volatile float duty = 40.0;
+volatile float duty = 0.4; // Valor inicial del duty cycle (40%)
 int setpoint = 75; // Valor de referencia para la humedad relativa
 unsigned long periodo_ms = 1000; // Periodo de la señal PWM en milisegundos
 
@@ -389,7 +390,7 @@ void calcularDutyCycle() {
     // Guardar el error actual para la próxima iteración
     errorAnterior = error;
 
-    // Asegurarse de que el duty cycle esté entre 0 y 100
+    // Asegurarse de que el duty cycle esté entre 0 y 1
     if (duty < 0.0f) duty = 0.0f;
     if (duty > 1.0f) duty = 1.0f;
 }
