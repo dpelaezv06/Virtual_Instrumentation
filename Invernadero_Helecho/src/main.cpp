@@ -49,8 +49,10 @@ float frecuencia_disparo = 120*8; // Frecuencia de disparo en Hz
 //Variables para el control PID del piezoeléctrico
 
 // Duty cycle (0 - 100 %)
+static unsigned long inicioPeriodo = 0;
 volatile float duty = 40.0;
 int setpoint = 75; // Valor de referencia para la humedad relativa
+unsigned long periodo_ms = 1000; // Periodo de la señal PWM en milisegundos
 
 //Posibles estados que puede tener la maquina de estados
 typedef enum {
@@ -81,19 +83,11 @@ void funcion_enviarTemperatura();
 void funcion_enviarNivelAgua();
 void configurarTimer(float frecuenciaHz);
 void funcionInterrupcion(timer_callback_args_t *args);
-void funcionInterrupcion1(timer_callback_args_t *args);
 
 void funcionInterpretarMensaje ();
 void serialEvent();
 void funcionPara_disparar ();
-void toggle();
-void inicializarHumidificador();
-void configurarTimer1(float frecuenciaHz);
-
-void controlHumidificador(float duty);
-
 void calcularDutyCycle();
-void controlHumidificador();
 
 void maquinaDeEstados();
 
@@ -109,6 +103,8 @@ void setup() {
     pinMode(disparador,OUTPUT);
     digitalWrite(ventilador,HIGH);
     digitalWrite(disparador,LOW);
+    digitalWrite(PIN_Humidificador,LOW);
+    inicioPeriodo = millis();
 
 }
 
@@ -175,7 +171,7 @@ void maquinaDeEstados() {
 
           case RHbaja_Talta:
               calcularDutyCycle(); // Calculamos el duty cycle para el humidificador
-              controlHumidificador(); // Controlamos el humidificador con el duty cycle calculado
+              PWM_Humidificador(); // Controlamos el humidificador con el duty cycle calculado
               estadoActual = medirTemperatura; // Volvemos a medir la humedad
               break;
 
@@ -202,7 +198,7 @@ void maquinaDeEstados() {
           
           case RHbaja_Tbaja:
               calcularDutyCycle(); // Calculamos el duty cycle para el humidificador
-              controlHumidificador(); // Controlamos el humidificador con el duty cycle calculado
+              PWM_Humidificador();// Controlamos el humidificador con el duty cycle calculado
               digitalWrite(disparador,LOW);
               detachInterrupt(digitalPinToInterrupt(zero_cross)); // Deshabilitamos la interrupción del cruce por cero
               digitalWrite(ventilador, HIGH); // Encender el ventilador
@@ -369,14 +365,6 @@ void funcionPara_disparar (){
     digitalWrite(disparador,HIGH);
 }
 
-//Funcion para control del humidificador mediante PID
-void controlHumidificador() {
-    // Asegurarse de que el duty cycle esté entre 0 y 100
-    if (duty < 0) duty = 0;
-    if (duty > 100) duty = 100;
-    analogWrite(PIN_Humidificador, (duty / 100.0) * 255); // Convertir el duty cycle a un valor entre 0 y 255
-}
-
 void calcularDutyCycle() {
     // Constantes del PID
     const float Kp = 1.0; // Ganancia proporcional
@@ -396,12 +384,31 @@ void calcularDutyCycle() {
     // Calcular el output del PID
     duty = Kp * error + Ki * integral + Kd * derivada;
 
+    duty = duty/100.0; // Convertir a porcentaje
+
     // Guardar el error actual para la próxima iteración
     errorAnterior = error;
 
     // Asegurarse de que el duty cycle esté entre 0 y 100
-    if (duty < 0) duty = 0;
-    if (duty > 100) duty = 100;
+    if (duty < 0.0f) duty = 0.0f;
+    if (duty > 1.0f) duty = 1.0f;
+}
+
+void PWM_Humidificador(){
+    unsigned long ahora = millis();
+
+    unsigned long tiempo = ahora - inicioPeriodo;
+
+    if(tiempo >= periodo_ms)
+    {
+        inicioPeriodo += periodo_ms;
+
+        tiempo = ahora - inicioPeriodo;
+    }
+
+    unsigned long tiempoON = periodo_ms * duty;
+
+    digitalWrite(PIN_Humidificador, tiempo < tiempoON);
 }
 
 
