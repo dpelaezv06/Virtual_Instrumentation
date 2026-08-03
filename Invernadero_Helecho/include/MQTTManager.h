@@ -60,9 +60,6 @@ class MQTTManager
 
 public:
 
-    using MessageHandler = void (*)(const char* topic,
-                                    const char* payload);
-
     /***************************************************************
      * Constructor
      ***************************************************************/
@@ -81,7 +78,8 @@ public:
     /***************************************************************
      * Registra un manejador para los mensajes entrantes.
      ***************************************************************/
-    void setMessageHandler(MessageHandler handler);
+    void setMessageHandler(void (*handler)(const char* topic,
+                                           const char* payload));
 
     /***************************************************************
      * Indica si existe conexión con el broker.
@@ -166,7 +164,8 @@ private:
 
     uint32_t connectionAttempt;
 
-    MessageHandler messageHandler;
+    void (*messageHandler)(const char* topic,
+                            const char* payload) = nullptr;
 
     static MQTTManager* instance;
 

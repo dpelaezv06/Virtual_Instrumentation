@@ -22,10 +22,10 @@
  *********************************************************************/
 
 // Nombre de la red WiFi
-constexpr char WIFI_SSID[] = "COMUNIDAD_UNMED";
+constexpr char WIFI_SSID[] = "Comunidad_UNMED";
 
 // Contraseña de la red
-constexpr char WIFI_PASSWORD[] = "wifi_med_123";
+constexpr char WIFI_PASSWORD[] = "wifi_med_213";
 
 /**********************************************************************
  *                      CONFIGURACIÓN MQTT

@@ -30,7 +30,7 @@ MQTTManager::MQTTManager(WiFiManager& wifiManager)
 
     connectionAttempt = 0;
 
-    messageHandler = nullptr;
+    this->messageHandler = nullptr;
 
     instance = this;
 }
@@ -241,12 +241,41 @@ void MQTTManager::subscribeTopics()
  *                      processMessage()
  ***********************************************************************/
 
+void MQTTManager::setMessageHandler(void (*handler)(const char* topic,
+                                                     const char* payload))
+{
+    this->messageHandler = handler;
+}
+
+bool MQTTManager::isConnected() const
+{
+    return const_cast<PubSubClient&>(client).connected();
+}
+
+MQTTState MQTTManager::getState() const
+{
+    return currentState;
+}
+
+uint32_t MQTTManager::getConnectionAttempts() const
+{
+    return connectionAttempt;
+}
+
 void MQTTManager::processMessage(const char* topic,
                                  const char* payload)
 {
-    if(messageHandler != nullptr)
+    if(this->messageHandler != nullptr)
     {
-        messageHandler(topic, payload);
+        this->messageHandler(topic, payload);
+    }
+}
+
+void MQTTManager::printDebug(const String& message) const
+{
+    if(DEBUG_SERIAL)
+    {
+        Serial.println(message);
     }
 }
 

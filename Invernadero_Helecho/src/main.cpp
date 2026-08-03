@@ -39,15 +39,15 @@ bool ventiladorActivo = false;
 bool estadoInicialPublicado = false;
 
 //Variables para guardar las temperaturas y humedades
-float temperatura1 = 0;
-float humedad1 = 0;
-float temperatura2 = 0;
-float humedad2 = 0;
-float temperaturaPromedio = 0;
-float humedadPromedio = 0;
+volatile float temperatura1 = 20;
+volatile float humedad1 = 0;
+volatile float temperatura2 = 21;
+volatile float humedad2 = 0;
+volatile float temperaturaPromedio = 0;
+volatile float humedadPromedio = 0;
 
 //Variable para almacenar el nivel del agua
-float nivel_agua = 0;
+volatile float nivel_agua = 0;
 
 //Bandera para detener el timer2
 volatile bool disparar = false;
@@ -82,7 +82,7 @@ typedef enum {
   RHmedia_Tbaja,
 } Estado;
 
-Estado estadoActual = IDLE;
+Estado estadoActual = medirTemperatura; // Estado inicial de la máquina de estados
 
 typedef enum {
   automatico,
@@ -107,6 +107,7 @@ void publicarEstadoActuadores();
 void publicarEstadoControl();
 
 void maquinaDeEstados();
+void leerSensores();
 
 void setup() {
     Serial.begin(115200);
@@ -157,14 +158,18 @@ void maquinaDeEstados() {
             if (nivel_agua < 7){
               Serial.println("A_");
             }
-
-            estadoActual = IDLE;
+            if (modoControl == automatico) {
+              estadoActual = medirTemperatura;
+            }
+            else {
+              estadoActual = IDLE;
+            }
             break;
 
           case medirTemperatura:
-              temperatura1 = dht1.readTemperature(); // Leer la temperatura en Celsius
-              temperatura2 = dht2.readTemperature(); // Leer la temperatura en Celsius
-              temperaturaPromedio = (temperatura1 + temperatura2) / 2;
+              temperatura1 = dht1.readTemperature();
+              temperatura2 = dht2.readTemperature();
+              temperaturaPromedio = (temperatura1 + temperatura2) / 2.0f;
 
               if (temperaturaPromedio > 40){
                 estadoActual = tempAlta;
@@ -186,9 +191,9 @@ void maquinaDeEstados() {
 
           
           case medirRH_Talta:
-              humedad1 = dht1.readHumidity(); // Leer la humedad relativa
-              humedad2 = dht2.readHumidity(); // Leer la humedad relativa
-              humedadPromedio = (humedad1 + humedad2) / 2;
+              humedad1 = dht1.readHumidity();
+              humedad2 = dht2.readHumidity();
+              humedadPromedio = (humedad1 + humedad2) / 2.0f;
 
               if (humedadPromedio < 70){
                 estadoActual = RHbaja_Talta;
@@ -212,9 +217,9 @@ void maquinaDeEstados() {
               break;
 
           case medirRH_Tbaja:
-              humedad1 = dht1.readHumidity(); // Leer la humedad relativa
-              humedad2 = dht2.readHumidity(); // Leer la humedad relativa
-              humedadPromedio = (humedad1 + humedad2) / 2;
+              humedad1 = dht1.readHumidity();
+              humedad2 = dht2.readHumidity();
+              humedadPromedio = (humedad1 + humedad2) / 2.0f;
 
               if (humedadPromedio < 70){
                 estadoActual = RHbaja_Tbaja;
@@ -309,7 +314,24 @@ void funcionInterrupcion(timer_callback_args_t *args) {
    
 }
 
+void leerSensores() {
+    temperatura1 = dht1.readTemperature();
+    temperatura2 = dht2.readTemperature();
+    temperaturaPromedio = (temperatura1 + temperatura2) / 2.0f;
+
+    humedad1 = dht1.readHumidity();
+    humedad2 = dht2.readHumidity();
+    humedadPromedio = (humedad1 + humedad2) / 2.0f;
+}
+
 void funcion_enviarTemperatura() {
+    Serial.print("T_");
+    Serial.print (temperatura1);
+    Serial.print ("_");
+    Serial.print (temperatura2);
+    Serial.print ("_");
+    Serial.print (temperaturaPromedio);
+
     mqttManager.publish(TOPIC_SENSOR_TEMPERATURA,
                          String(temperaturaPromedio, 2).c_str());
     mqttManager.publish(TOPIC_SENSOR_HUMEDAD,
