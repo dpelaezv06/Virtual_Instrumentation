@@ -1,142 +1,149 @@
-#ifndef WIFI_MANAGER_H
-#define WIFI_MANAGER_H
+#ifndef MQTT_MANAGER_H
+#define MQTT_MANAGER_H
 
 /***********************************************************************
  *
- *                      WiFiManager
+ *                      MQTTManager
  *
  *  Proyecto:
  *      Invernadero Inteligente IoT
  *
  *  Descripción:
  *
- *      Gestiona completamente la conexión WiFi mediante una
- *      máquina de estados NO BLOQUEANTE.
+ *      Gestiona toda la comunicación MQTT del sistema.
  *
  *      Responsabilidades:
- *          • Inicializar el módulo WiFi.
- *          • Establecer la conexión con la red.
- *          • Mantener la conexión.
- *          • Reconectar automáticamente.
- *          • Proporcionar información del enlace.
  *
- *      Este módulo NO conoce nada acerca de MQTT.
+ *          • Conectarse al broker MQTT.
+ *          • Reconectarse automáticamente.
+ *          • Suscribirse a los topics.
+ *          • Publicar mensajes.
+ *          • Recibir mensajes.
+ *          • Mantener la conexión.
+ *
+ *      Este módulo NO conoce la lógica de control del invernadero.
  *
  ***********************************************************************/
 
 #include <Arduino.h>
 #include <WiFiS3.h>
+#include <PubSubClient.h>
 
 #include "Config.h"
+#include "Topics.h"
+#include "MQTTPayLoads.h"
+#include "WiFiManager.h"
 
 /***********************************************************************
- *                  Estados del módulo WiFi
+ *                  Estados MQTT
  ***********************************************************************/
 
-enum class WiFiState
+enum class MQTTState
 {
-    DISCONNECTED,       // Sin conexión
+    DISCONNECTED,
 
-    CONNECTING,         // Intentando conectar
+    CONNECTING,
 
-    CONNECTED,          // Conectado correctamente
+    CONNECTED,
 
-    CONNECTION_FAILED,  // Timeout durante la conexión
+    CONNECTION_FAILED,
 
-    RECONNECTING        // Esperando el siguiente intento
+    RECONNECTING
 };
 
 /***********************************************************************
- *                      Clase WiFiManager
+ *                  Clase MQTTManager
  ***********************************************************************/
 
-class WiFiManager
+class MQTTManager
 {
 
 public:
 
+    using MessageHandler = void (*)(const char* topic,
+                                    const char* payload);
+
     /***************************************************************
      * Constructor
      ***************************************************************/
-    WiFiManager();
+    explicit MQTTManager(WiFiManager& wifiManager);
 
     /***************************************************************
-     * Inicializa el módulo.
-     *
-     * Debe llamarse únicamente una vez desde setup().
+     * Inicializa el módulo MQTT.
      ***************************************************************/
     void begin();
 
     /***************************************************************
-     * Actualiza la máquina de estados.
-     *
      * Debe llamarse continuamente desde loop().
      ***************************************************************/
     void loop();
 
     /***************************************************************
-     * Indica si existe conexión WiFi.
+     * Registra un manejador para los mensajes entrantes.
+     ***************************************************************/
+    void setMessageHandler(MessageHandler handler);
+
+    /***************************************************************
+     * Indica si existe conexión con el broker.
      ***************************************************************/
     bool isConnected() const;
 
     /***************************************************************
-     * Devuelve el estado actual del módulo.
+     * Devuelve el estado actual del módulo MQTT.
      ***************************************************************/
-    WiFiState getState() const;
+    MQTTState getState() const;
 
     /***************************************************************
-     * Devuelve la dirección IP asignada.
+     * Publica un mensaje.
      ***************************************************************/
-    IPAddress localIP() const;
+    bool publish(const char* topic,
+                 const char* payload,
+                 bool retained = false);
 
     /***************************************************************
-     * Devuelve la intensidad de la señal (RSSI).
-     *
-     * Unidad:
-     *      dBm
+     * Suscribe un topic.
      ***************************************************************/
-    long RSSI() const;
+    bool subscribe(const char* topic);
 
     /***************************************************************
-     * Devuelve el número de intentos de conexión realizados.
-     *
-     * Útil para depuración y diagnóstico.
+     * Devuelve el número de intentos de conexión.
      ***************************************************************/
     uint32_t getConnectionAttempts() const;
 
 private:
 
     /***************************************************************
-     * Inicia un nuevo intento de conexión.
-     *
-     * Esta función únicamente ejecuta WiFi.begin().
-     * No bloquea la ejecución.
+     * Inicia un intento de conexión.
      ***************************************************************/
     void startConnection();
 
     /***************************************************************
-     * Supervisa el intento de conexión iniciado previamente.
-     *
-     * Comprueba:
-     *      • Si la conexión fue exitosa.
-     *      • Si ocurrió un timeout.
+     * Actualiza el proceso de conexión.
      ***************************************************************/
     void updateConnection();
 
     /***************************************************************
-     * Comprueba periódicamente si la conexión se perdió.
+     * Comprueba si la conexión continúa activa.
      ***************************************************************/
     void checkConnection();
 
     /***************************************************************
-     * Desconecta la interfaz WiFi.
+     * Se suscribe a todos los topics del proyecto.
      ***************************************************************/
-    void disconnect();
+    void subscribeTopics();
 
     /***************************************************************
-     * Imprime información de la conexión.
+     * Callback interno de PubSubClient.
      ***************************************************************/
-    void printConnectionInfo() const;
+    static void mqttCallback(char* topic,
+                             byte* payload,
+                             unsigned int length);
+
+    /***************************************************************
+     * Procesa el mensaje recibido.
+     ***************************************************************/
+    void processMessage(const char* topic,
+                        const char* payload);
 
     /***************************************************************
      * Imprime mensajes de depuración.
@@ -145,25 +152,23 @@ private:
 
 private:
 
-    /***************************************************************
-     * Estado actual del módulo.
-     ***************************************************************/
-    WiFiState currentState;
+    WiFiManager& wifi;
 
-    /***************************************************************
-     * Instante en que comenzó el intento de conexión actual.
-     ***************************************************************/
+    WiFiClient wifiClient;
+
+    PubSubClient client;
+
+    MQTTState currentState;
+
     unsigned long connectionStartTime;
 
-    /***************************************************************
-     * Instante del último intento de reconexión.
-     ***************************************************************/
     unsigned long lastReconnectAttempt;
 
-    /***************************************************************
-     * Contador de intentos de conexión.
-     ***************************************************************/
     uint32_t connectionAttempt;
+
+    MessageHandler messageHandler;
+
+    static MQTTManager* instance;
 
 };
 

@@ -90,6 +90,9 @@ constexpr char TOPIC_CFG_SETPOINT[] =
  *      Aplicación Web
  ***********************************************************************/
 
+constexpr char TOPIC_ESTADO_ACTUADORES[] =
+"invernadero/estado/actuadores";
+
 constexpr char TOPIC_ESTADO_BOMBILLA[] =
 "invernadero/estado/bombilla";
 

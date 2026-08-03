@@ -22,10 +22,10 @@
  *********************************************************************/
 
 // Nombre de la red WiFi
-constexpr char WIFI_SSID[] = "NOMBRE_DE_TU_RED";
+constexpr char WIFI_SSID[] = "COMUNIDAD_UNMED";
 
 // Contraseña de la red
-constexpr char WIFI_PASSWORD[] = "CONTRASEÑA_WIFI";
+constexpr char WIFI_PASSWORD[] = "wifi_med_123";
 
 /**********************************************************************
  *                      CONFIGURACIÓN MQTT
@@ -34,12 +34,12 @@ constexpr char WIFI_PASSWORD[] = "CONTRASEÑA_WIFI";
 // Dirección del Broker MQTT
 constexpr char MQTT_SERVER[] = "broker.emqx.io";
 
-// Puerto MQTT
-constexpr uint16_t MQTT_PORT = 1883;
-
 // Usuario MQTT
 // (dejar vacío si el broker no requiere autenticación)
 constexpr char MQTT_USER[] = "";
+
+// Puerto MQTT
+constexpr uint16_t MQTT_PORT = 1883;
 
 // Contraseña MQTT
 constexpr char MQTT_PASSWORD[] = "";
